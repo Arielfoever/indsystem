@@ -70,6 +70,9 @@ jobs:
         uses: actions/deploy-pages@v5
   
   deployoss:
+    environment:
+      name: oss-pages
+      url: "https://localdce.ariels.xyz"
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -82,8 +85,8 @@ jobs:
         run: |
           curl -fSL -o ossutil.zip "https://gosspublic.alicdn.com/ossutil/v2/2.2.2/ossutil-2.2.2-linux-amd64.zip?spm=a2c4g.11186623.0.0.600a3236f8lUH5&file=ossutil-2.2.2-linux-amd64.zip"
           unzip -q ossutil.zip
-          chmod +x ossutil-v2.2.2-linux-amd64/ossutil64
-          sudo mv ossutil-v2.2.2-linux-amd64/ossutil64 /usr/local/bin/ossutil64
+          chmod +x ossutil-v2.2.2-linux-amd64/ossutil
+          sudo mv ossutil-v2.2.2-linux-amd64/ossutil /usr/local/bin/ossutil
 
       - name: Configure ossutil
         env:
@@ -91,10 +94,10 @@ jobs:
           OSS_ACCESS_KEY_ID: ${{ secrets.ALIYUN_OSS_ACCESS_KEY_ID }}
           OSS_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_OSS_ACCESS_KEY_SECRET }}
         run: |
-          ossutil64 config -e "$OSS_ENDPOINT" -i "$OSS_ACCESS_KEY_ID" -k "$OSS_ACCESS_KEY_SECRET" -L CH
+          ossutil config -e "$OSS_ENDPOINT" -i "$OSS_ACCESS_KEY_ID" -k "$OSS_ACCESS_KEY_SECRET" -L CH
 
       - name: Upload dist to OSS
         env:
           OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET }}
         run: |
-          ossutil64 sync dist "oss://$OSS_BUCKET/" --delete --force
+          ossutil sync dist "oss://$OSS_BUCKET/" --delete --force
