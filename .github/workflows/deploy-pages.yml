@@ -27,6 +27,15 @@ jobs:
           node-version: latest
           cache: npm
 
+      - name: Cache node_modules
+        id: cache-node-modules
+        uses: actions/cache@v5
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-
+
       - name: Install dependencies
         run: npm ci
 
@@ -71,7 +80,7 @@ jobs:
       
       - name: Install ossutil
         run: |
-          curl -L -o ossutil.zip https://gosspublic.alicdn.com/ossutil/v2/2.2.2/ossutil-2.2.2-linux-amd64.zip?spm=a2c4g.11186623.0.0.600a3236f8lUH5&file=ossutil-2.2.2-linux-amd64.zip
+          curl -fSL -o ossutil.zip "https://gosspublic.alicdn.com/ossutil/v2/2.2.2/ossutil-2.2.2-linux-amd64.zip?spm=a2c4g.11186623.0.0.600a3236f8lUH5&file=ossutil-2.2.2-linux-amd64.zip"
           unzip -q ossutil.zip
           chmod +x ossutil-v2.2.2-linux-amd64/ossutil64
           sudo mv ossutil-v2.2.2-linux-amd64/ossutil64 /usr/local/bin/ossutil64
@@ -89,4 +98,3 @@ jobs:
           OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET }}
         run: |
           ossutil64 sync dist "oss://$OSS_BUCKET/" --delete --force
-
