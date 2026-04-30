@@ -85,7 +85,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: dist-oss
-          path: ${{ github.workspace }}
+          path: ${{ github.workspace }}/dist
 
       - name: Install ossutil 2.2.2
         run: |
