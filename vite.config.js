@@ -2,8 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
-const repoName = process.env.GITHUB_REPOSITORY?.split('/')[1] || ''
-const base = process.env.GITHUB_ACTIONS ? `/${repoName}/` : '/'
+const base = process.env.VITE_BASE_URL || '/'
 
 // https://vite.dev/config/
 export default defineConfig({
