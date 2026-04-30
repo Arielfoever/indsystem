@@ -64,6 +64,8 @@ function App() {
   const [provider, setProvider] = useState('wasm')
   const [modelSource, setModelSource] = useState('online')
   const [selectedOnlineModel, setSelectedOnlineModel] = useState(ONLINE_MODELS[0].id)
+  const [cameraDevices, setCameraDevices] = useState([])
+  const [selectedCameraId, setSelectedCameraId] = useState('')
   const [modelName, setModelName] = useState('')
   const [modelInputSize, setModelInputSize] = useState(256)
   const [status, setStatus] = useState(makeStatus('info', ''))
@@ -176,7 +178,7 @@ function App() {
     return new ort.Tensor('float32', floatData, [1, 3, size, size])
   }
 
-  const drawTensorToCanvas = (tensor, canvas) => {
+  const drawTensorToCanvas = (tensor, canvas, mirror = false) => {
     const h = tensor.dims[2]
     const w = tensor.dims[3]
     const frame = document.createElement('canvas')
@@ -195,10 +197,18 @@ function App() {
     frameCtx.putImageData(imageData, 0, 0)
     const ctx = canvas.getContext('2d')
     ctx.clearRect(0, 0, canvas.width, canvas.height)
-    ctx.drawImage(frame, 0, 0, frame.width, frame.height, 0, 0, canvas.width, canvas.height)
+    if (mirror) {
+      ctx.save()
+      ctx.translate(canvas.width, 0)
+      ctx.scale(-1, 1)
+      ctx.drawImage(frame, 0, 0, frame.width, frame.height, 0, 0, canvas.width, canvas.height)
+      ctx.restore()
+    } else {
+      ctx.drawImage(frame, 0, 0, frame.width, frame.height, 0, 0, canvas.width, canvas.height)
+    }
   }
 
-  const runEnhanceOnElement = async (sourceEl, outputCanvas) => {
+  const runEnhanceOnElement = async (sourceEl, outputCanvas, mirror = false) => {
     if (!sessionRef.current) {
       setStatus(makeStatus('warning', t.status.loadModelFirst))
       return
@@ -207,7 +217,7 @@ function App() {
     const inputTensor = preprocessToTensor(sourceEl, modelInputSize)
     const feed = { [modelInputNameRef.current]: inputTensor }
     const result = await sessionRef.current.run(feed)
-    drawTensorToCanvas(result[modelOutputNameRef.current], outputCanvas)
+    drawTensorToCanvas(result[modelOutputNameRef.current], outputCanvas, mirror)
     setProcessMs(Math.round(performance.now() - t0))
   }
 
@@ -297,7 +307,7 @@ function App() {
         processingRef.current = true
         try {
           lastInferAtRef.current = now
-          await runEnhanceOnElement(video, output)
+          await runEnhanceOnElement(video, output, sourceMode === 'camera')
           const times = fpsTimesRef.current
           times.push(now)
           while (times.length > 0 && now - times[0] > 1000) times.shift()
@@ -451,8 +461,11 @@ function App() {
     }
     try {
       cleanupCamera()
+      const videoConstraints = selectedCameraId
+        ? { deviceId: { exact: selectedCameraId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+        : { width: { ideal: 1280 }, height: { ideal: 720 } }
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: videoConstraints,
         audio: false
       })
       streamRef.current = stream
@@ -479,8 +492,11 @@ function App() {
     }
     try {
       cleanupCamera()
+      const videoConstraints = selectedCameraId
+        ? { deviceId: { exact: selectedCameraId } }
+        : true
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
+        video: videoConstraints,
         audio: false
       })
       streamRef.current = stream
@@ -489,6 +505,28 @@ function App() {
       await video.play()
       setRunning(true)
       setStatus(makeStatus('success', t.status.cameraSwitched))
+    } catch (error) {
+      setStatus(makeStatus('error', t.status.cameraSwitchFailed(error.message)))
+    }
+  }
+
+  const refreshCameraDevices = async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+      setStatus(makeStatus('error', t.status.mediaDevicesUnavailable))
+      return
+    }
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices()
+      const videos = all.filter((d) => d.kind === 'videoinput')
+      setCameraDevices(videos)
+      if (!videos.length) {
+        setSelectedCameraId('')
+        setStatus(makeStatus('warning', t.status.noCameraFound))
+        return
+      }
+      if (!videos.some((d) => d.deviceId === selectedCameraId)) {
+        setSelectedCameraId(videos[0].deviceId)
+      }
     } catch (error) {
       setStatus(makeStatus('error', t.status.cameraSwitchFailed(error.message)))
     }
@@ -549,6 +587,12 @@ function App() {
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
     }
   }, [running, maxFps, sourceMode])
+
+  useEffect(() => {
+    if (sourceMode === 'camera') {
+      refreshCameraDevices()
+    }
+  }, [sourceMode])
 
   useEffect(
     () => () => {
@@ -797,6 +841,28 @@ function App() {
                     <Stack direction="row" justifyContent="space-between" alignItems="center">
                       <Typography variant="subtitle2">{t.ui.camera}</Typography>
                       <Button size="small" variant="outlined" onClick={switchCamera}>{t.ui.switchCamera}</Button>
+                    </Stack>
+                    <Stack direction="row" spacing={1}>
+                      <FormControl size="small" fullWidth>
+                        <InputLabel id="camera-list-label">{t.ui.cameraList}</InputLabel>
+                        <Select
+                          labelId="camera-list-label"
+                          value={selectedCameraId}
+                          label={t.ui.cameraList}
+                          onChange={(e) => setSelectedCameraId(e.target.value)}
+                        >
+                          {cameraDevices.length > 0 ? (
+                            cameraDevices.map((device, index) => (
+                              <MenuItem key={device.deviceId || `camera-${index}`} value={device.deviceId}>
+                                {device.label || `${t.ui.camera} ${index + 1}`}
+                              </MenuItem>
+                            ))
+                          ) : (
+                            <MenuItem value="" disabled>{t.ui.noCameraOption}</MenuItem>
+                          )}
+                        </Select>
+                      </FormControl>
+                      <Button variant="outlined" onClick={refreshCameraDevices}>{t.ui.refreshCameraList}</Button>
                     </Stack>
                     <video
                       ref={cameraVideoRef}
