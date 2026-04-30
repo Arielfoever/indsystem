@@ -80,24 +80,40 @@ jobs:
         with:
           name: github-pages
           path: $GITHUB_WORKSPACE/dist
-      
-      - name: Install ossutil
+
+      - name: Install ossutil 2.2.2
         run: |
-          curl -fSL -o ossutil.zip "https://gosspublic.alicdn.com/ossutil/v2/2.2.2/ossutil-2.2.2-linux-amd64.zip?spm=a2c4g.11186623.0.0.600a3236f8lUH5&file=ossutil-2.2.2-linux-amd64.zip"
-          unzip -q ossutil.zip
+          sudo apt-get update
+          sudo apt-get install -y unzip
+          curl -fSL -o ossutil-2.2.2-linux-amd64.zip https://gosspublic.alicdn.com/ossutil/v2/2.2.2/ossutil-2.2.2-linux-amd64.zip
+          unzip -q ossutil-2.2.2-linux-amd64.zip
           chmod +x ossutil-2.2.2-linux-amd64/ossutil
           sudo mv ossutil-2.2.2-linux-amd64/ossutil /usr/local/bin/ossutil
+          sudo ln -sf /usr/local/bin/ossutil /usr/bin/ossutil
+          ossutil version
 
-      - name: Configure ossutil
+      - name: Validate OSS secrets
         env:
-          OSS_ENDPOINT: ${{ secrets.ALIYUN_OSS_ENDPOINT }}
+          OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET }}
+          OSS_REGION: ${{ secrets.ALIYUN_OSS_REGION }}
           OSS_ACCESS_KEY_ID: ${{ secrets.ALIYUN_OSS_ACCESS_KEY_ID }}
           OSS_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_OSS_ACCESS_KEY_SECRET }}
         run: |
-          ossutil config -e "$OSS_ENDPOINT" -i "$OSS_ACCESS_KEY_ID" -k "$OSS_ACCESS_KEY_SECRET" -L CH
+          test -n "$OSS_BUCKET"
+          test -n "$OSS_REGION"
+          test -n "$OSS_ACCESS_KEY_ID"
+          test -n "$OSS_ACCESS_KEY_SECRET"
 
       - name: Upload dist to OSS
         env:
           OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET }}
+          OSS_REGION: ${{ secrets.ALIYUN_OSS_REGION }}
+          OSS_ENDPOINT: ${{ secrets.ALIYUN_OSS_ENDPOINT }}
+          OSS_ACCESS_KEY_ID: ${{ secrets.ALIYUN_OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_OSS_ACCESS_KEY_SECRET }}
         run: |
-          ossutil sync dist "oss://$OSS_BUCKET/" --delete --force
+          if [ -n "$OSS_ENDPOINT" ]; then
+            ossutil sync dist "oss://$OSS_BUCKET/" --delete --force --region "$OSS_REGION" --endpoint "$OSS_ENDPOINT"
+          else
+            ossutil sync dist "oss://$OSS_BUCKET/" --delete --force --region "$OSS_REGION"
+          fi
