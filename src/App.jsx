@@ -160,9 +160,9 @@ function App() {
   }, [])
 
   const loadOrtModule = async () => {
-    const target = provider === 'wasm' ? 'onnxruntime-web/wasm' : 'onnxruntime-web'
+    const target = provider === 'wasm' ? 'wasm' : 'default'
     if (!ortModuleRef.current.mod || ortModuleRef.current.target !== target) {
-      const mod = await import(target)
+      const mod = provider === 'wasm' ? await import('onnxruntime-web/wasm') : await import('onnxruntime-web')
       mod.env.wasm.numThreads = 1
       mod.env.wasm.proxy = false
       ortModuleRef.current = { target, mod }
