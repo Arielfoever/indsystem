@@ -85,7 +85,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: dist-oss
-          path: $GITHUB_WORKSPACE/dist
+          path: $GITHUB_WORKSPACE
 
       - name: Install ossutil 2.2.2
         run: |
@@ -118,8 +118,17 @@ jobs:
           OSS_ACCESS_KEY_ID: ${{ secrets.ALIYUN_OSS_ACCESS_KEY_ID }}
           OSS_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_OSS_ACCESS_KEY_SECRET }}
         run: |
+          DIST_DIR="$GITHUB_WORKSPACE/dist"
+          if [ ! -d "$DIST_DIR" ] && [ -d "$GITHUB_WORKSPACE/dist-oss/dist" ]; then
+            DIST_DIR="$GITHUB_WORKSPACE/dist-oss/dist"
+          fi
+          if [ ! -d "$DIST_DIR" ]; then
+            echo "dist directory not found"
+            ls -la "$GITHUB_WORKSPACE"
+            exit 1
+          fi
           if [ -n "$OSS_ENDPOINT" ]; then
-            ossutil sync dist "oss://$OSS_BUCKET/" --delete --force --region "$OSS_REGION" --endpoint "$OSS_ENDPOINT"
+            ossutil sync "$DIST_DIR" "oss://$OSS_BUCKET/" --delete --force --region "$OSS_REGION" --endpoint "$OSS_ENDPOINT"
           else
-            ossutil sync dist "oss://$OSS_BUCKET/" --delete --force --region "$OSS_REGION"
+            ossutil sync "$DIST_DIR" "oss://$OSS_BUCKET/" --delete --force --region "$OSS_REGION"
           fi
