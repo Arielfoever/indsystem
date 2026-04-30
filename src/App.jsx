@@ -68,6 +68,7 @@ function App() {
   const [selectedOnlineModel, setSelectedOnlineModel] = useState(ONLINE_MODELS[0].id)
   const [cameraDevices, setCameraDevices] = useState([])
   const [selectedCameraId, setSelectedCameraId] = useState('')
+  const [cameraMirror, setCameraMirror] = useState(true)
   const [modelName, setModelName] = useState('')
   const [modelInputSize, setModelInputSize] = useState(256)
   const [status, setStatus] = useState(makeStatus('info', ''))
@@ -558,7 +559,7 @@ function App() {
         processingRef.current = true
         try {
           lastInferAtRef.current = now
-          const processTime = await runEnhanceOnElement(video, output, sourceMode === 'camera')
+          const processTime = await runEnhanceOnElement(video, output, sourceMode === 'camera' ? cameraMirror : false)
           updateAutoMaxFps(processTime)
           const times = fpsTimesRef.current
           times.push(now)
@@ -1312,7 +1313,16 @@ function App() {
                   <Stack spacing={1.5}>
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }}>
                       <Typography variant="subtitle2">{t.ui.camera}</Typography>
-                      <Button size="small" variant="outlined" onClick={switchCamera}>{t.ui.switchCamera}</Button>
+                      <Stack direction="row" spacing={1}>
+                        <Button
+                          size="small"
+                          variant={cameraMirror ? 'contained' : 'outlined'}
+                          onClick={() => setCameraMirror((v) => !v)}
+                        >
+                          {t.ui.mirrorCamera}
+                        </Button>
+                        <Button size="small" variant="outlined" onClick={switchCamera}>{t.ui.switchCamera}</Button>
+                      </Stack>
                     </Stack>
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
                       <FormControl size="small" fullWidth>
@@ -1345,7 +1355,7 @@ function App() {
                         maxHeight: activeFullscreen === 'input' ? '82vh' : '52vh',
                         borderRadius: 12,
                         background: '#091320',
-                        transform: 'scaleX(-1)'
+                        transform: cameraMirror ? 'scaleX(-1)' : 'none'
                       }}
                     />
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
