@@ -41,8 +41,17 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Verify manifest generated
+        run: test -f dist/manifest.webmanifest
+
       - name: Setup Pages
         uses: actions/configure-pages@v6
+
+      - name: Upload manifest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest
+          path: dist/manifest.webmanifest
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5

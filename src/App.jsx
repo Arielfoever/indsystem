@@ -131,7 +131,7 @@ function App() {
   const pendingProcessMsRef = useRef(0)
   const autoFpsEstimateRef = useRef(8)
   const lastAutoFpsUpdateAtRef = useRef(0)
-  const ortModuleRef = useRef(null)
+  const ortModuleRef = useRef({ target: '', mod: null })
   const onlineModelAbortRef = useRef(null)
   const fixedInputSizeRef = useRef(null)
   const renderFallbackWarnedRef = useRef(false)
@@ -160,13 +160,14 @@ function App() {
   }, [])
 
   const loadOrtModule = async () => {
-    if (!ortModuleRef.current) {
-      const mod = await import('onnxruntime-web')
+    const target = provider === 'wasm' ? 'onnxruntime-web/wasm' : 'onnxruntime-web'
+    if (!ortModuleRef.current.mod || ortModuleRef.current.target !== target) {
+      const mod = await import(target)
       mod.env.wasm.numThreads = 1
       mod.env.wasm.proxy = false
-      ortModuleRef.current = mod
+      ortModuleRef.current = { target, mod }
     }
-    return ortModuleRef.current
+    return ortModuleRef.current.mod
   }
 
   const getModelCacheHandle = async () => {
