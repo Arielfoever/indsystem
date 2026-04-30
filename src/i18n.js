@@ -22,6 +22,7 @@ export const messages = {
       camera: '摄像头',
       video: '视频',
       maxFps: '最大推理帧率',
+      inferenceScale: '推理缩放',
       input: '输入',
       chooseImage: '选择图片',
       size: '尺寸',
@@ -50,14 +51,20 @@ export const messages = {
       cryptoApi: '加密 API',
       ok: '可用',
       unavailable: '不可用',
-      modelNotLoaded: '未加载'
+      modelNotLoaded: '未加载',
+      showSection: '显示',
+      hideSection: '收起',
+      fullScreen: '全屏',
+      exitFullScreen: '退出全屏'
     },
     status: {
       loadModelFirst: '请先加载模型',
+      modelFixedInputFallback: '当前模型可能固定输入尺寸，已自动回退为模型默认尺寸',
       videoEnded: '视频播放结束，推理已停止',
       realtimeFailed: (e) => `实时推理失败: ${e}`,
       loadingModel: (name) => `正在加载模型: ${name}`,
       loadingOnlineModel: (name) => `正在加载在线模型: ${name}`,
+      onlineModelLoadCancelled: '已取消上一次在线模型加载请求',
       onlineModelCached: (name) => `在线模型已缓存并加载: ${name}`,
       integritySkipped: '当前环境不支持 SHA-256 校验，已跳过完整性验证',
       hashMismatch: '模型完整性校验失败（SHA-256 不匹配）',
@@ -88,7 +95,8 @@ export const messages = {
       videoPlayFailed: (e) => `视频播放失败: ${e}`,
       videoStopped: '视频推理已停止',
       noVideoToDownload: '暂无可下载视频，请先运行并停止视频推理',
-      loadOnnxFirst: '请先加载 ONNX 模型'
+      loadOnnxFirst: '请先加载 ONNX 模型',
+      fullscreenUnavailable: '当前环境不支持全屏，或全屏请求被浏览器阻止'
     }
   },
   en: {
@@ -114,6 +122,7 @@ export const messages = {
       camera: 'Camera',
       video: 'Video',
       maxFps: 'Max Inference FPS',
+      inferenceScale: 'Inference Scale',
       input: 'Input',
       chooseImage: 'Select Image',
       size: 'Size',
@@ -142,14 +151,20 @@ export const messages = {
       cryptoApi: 'Crypto API',
       ok: 'Available',
       unavailable: 'Unavailable',
-      modelNotLoaded: 'Not loaded'
+      modelNotLoaded: 'Not loaded',
+      showSection: 'Show',
+      hideSection: 'Hide',
+      fullScreen: 'Fullscreen',
+      exitFullScreen: 'Exit Fullscreen'
     },
     status: {
       loadModelFirst: 'Please load a model first',
+      modelFixedInputFallback: 'This model may use a fixed input size, automatically fell back to model default size',
       videoEnded: 'Video ended, inference stopped',
       realtimeFailed: (e) => `Real-time inference failed: ${e}`,
       loadingModel: (name) => `Loading model: ${name}`,
       loadingOnlineModel: (name) => `Loading online model: ${name}`,
+      onlineModelLoadCancelled: 'Previous online model load request cancelled',
       onlineModelCached: (name) => `Online model cached and loaded: ${name}`,
       integritySkipped: 'SHA-256 is unavailable in this environment, integrity check skipped',
       hashMismatch: 'Model integrity check failed (SHA-256 mismatch)',
@@ -180,7 +195,8 @@ export const messages = {
       videoPlayFailed: (e) => `Video play failed: ${e}`,
       videoStopped: 'Video inference stopped',
       noVideoToDownload: 'No downloadable video yet. Run and stop video inference first',
-      loadOnnxFirst: 'Please load an ONNX model first'
+      loadOnnxFirst: 'Please load an ONNX model first',
+      fullscreenUnavailable: 'Fullscreen is unavailable or blocked by the browser in this environment'
     }
   }
 }

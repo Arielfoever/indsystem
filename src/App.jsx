@@ -13,6 +13,7 @@ import {
   Divider,
   Drawer,
   FormControl,
+  IconButton,
   InputLabel,
   LinearProgress,
   MenuItem,
@@ -26,11 +27,13 @@ import CameraAltRoundedIcon from '@mui/icons-material/CameraAltRounded'
 import PhotoRoundedIcon from '@mui/icons-material/PhotoRounded'
 import MovieRoundedIcon from '@mui/icons-material/MovieRounded'
 import MemoryRoundedIcon from '@mui/icons-material/MemoryRounded'
-import * as ort from 'onnxruntime-web'
+import FullscreenRoundedIcon from '@mui/icons-material/FullscreenRounded'
+import FullscreenExitRoundedIcon from '@mui/icons-material/FullscreenExitRounded'
 import { getMessages } from './i18n'
 import { MODEL_CACHE_NAME, ONLINE_MODELS } from './onlineModels'
 
 const drawerWidth = 320
+const METRICS_UPDATE_GAP_MS = 120
 
 const theme = createTheme({
   cssVariables: true,
@@ -59,6 +62,7 @@ function App() {
     return systemLang.startsWith('zh') ? 'zh' : 'en'
   })
   const isMobile = useMediaQuery('(max-width:900px)')
+  const appBarHeight = isMobile ? 56 : 64
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false)
   const [sourceMode, setSourceMode] = useState('image')
   const [provider, setProvider] = useState('wasm')
@@ -77,6 +81,11 @@ function App() {
   const [videoInfoText, setVideoInfoText] = useState('-')
   const [imageDownloadFormat, setImageDownloadFormat] = useState('png')
   const [videoDownloadFormat, setVideoDownloadFormat] = useState('mp4')
+  const [canvasSize, setCanvasSize] = useState({ width: 640, height: 420 })
+  const [inferenceScale, setInferenceScale] = useState(100)
+  const [mobileInputOpen, setMobileInputOpen] = useState(true)
+  const [mobileOutputOpen, setMobileOutputOpen] = useState(true)
+  const [activeFullscreen, setActiveFullscreen] = useState('')
 
   const imageInputRef = useRef(null)
   const videoInputRef = useRef(null)
@@ -85,12 +94,15 @@ function App() {
   const outputCanvasRef = useRef(null)
   const cameraVideoRef = useRef(null)
   const fileVideoRef = useRef(null)
+  const inputPanelRef = useRef(null)
+  const outputPanelRef = useRef(null)
   const rafRef = useRef(0)
   const streamRef = useRef(null)
   const sessionRef = useRef(null)
   const modelInputNameRef = useRef('')
   const modelOutputNameRef = useRef('')
   const imageElementRef = useRef(null)
+  const imageObjectUrlRef = useRef('')
   const videoObjectUrlRef = useRef('')
   const processingRef = useRef(false)
   const lastInferAtRef = useRef(0)
@@ -100,9 +112,27 @@ function App() {
   const recordedVideoUrlRef = useRef('')
   const recordedVideoExtRef = useRef('webm')
   const recordedVideoMimeRef = useRef('video/webm')
+  const preprocessCanvasRef = useRef(null)
+  const preprocessCtxRef = useRef(null)
+  const preprocessBufferRef = useRef(null)
+  const preprocessBufferSizeRef = useRef(0)
+  const frameCanvasRef = useRef(null)
+  const frameCtxRef = useRef(null)
+  const frameImageDataRef = useRef(null)
+  const frameImageDataKeyRef = useRef('')
+  const lastMetricsUpdateAtRef = useRef(0)
+  const pendingFpsRef = useRef(0)
+  const pendingProcessMsRef = useRef(0)
+  const ortModuleRef = useRef(null)
+  const onlineModelAbortRef = useRef(null)
 
   const providerOptions = useMemo(() => ['webgpu', 'webgl', 'wasm'], [])
   const t = useMemo(() => getMessages(lang), [lang])
+  const effectiveInferenceSize = useMemo(() => {
+    const scaled = Math.round((modelInputSize * inferenceScale) / 100)
+    const snapped = Math.round(scaled / 8) * 8
+    return Math.max(64, Math.min(modelInputSize, snapped))
+  }, [inferenceScale, modelInputSize])
   const envStatus = useMemo(() => {
     const secure = typeof window !== 'undefined' ? window.isSecureContext : false
     const camera = typeof navigator !== 'undefined' && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
@@ -111,7 +141,16 @@ function App() {
     return { secure, camera, cache, crypto }
   }, [])
 
+  const loadOrtModule = async () => {
+    if (!ortModuleRef.current) {
+      const mod = await import('onnxruntime-web')
+      ortModuleRef.current = mod
+    }
+    return ortModuleRef.current
+  }
+
   const createSessionFromBuffer = async (buffer, displayName) => {
+    const ort = await loadOrtModule()
     const session = await ort.InferenceSession.create(buffer, {
       executionProviders: [provider]
     })
@@ -162,30 +201,58 @@ function App() {
     ctx.drawImage(image, x, y, drawWidth, drawHeight)
   }
 
-  const preprocessToTensor = (sourceEl, size) => {
-    const prep = document.createElement('canvas')
-    prep.width = size
-    prep.height = size
-    const prepCtx = prep.getContext('2d', { willReadFrequently: true })
+  const syncCanvasSize = (width, height) => {
+    const w = Math.max(1, Math.round(width || 0))
+    const h = Math.max(1, Math.round(height || 0))
+    if (!w || !h) return
+    setCanvasSize((prev) => (prev.width === w && prev.height === h ? prev : { width: w, height: h }))
+  }
+
+  const preprocessToTensor = (sourceEl, size, ort) => {
+    if (!preprocessCanvasRef.current) {
+      preprocessCanvasRef.current = document.createElement('canvas')
+    }
+    const prep = preprocessCanvasRef.current
+    if (prep.width !== size) prep.width = size
+    if (prep.height !== size) prep.height = size
+    if (!preprocessCtxRef.current) {
+      preprocessCtxRef.current = prep.getContext('2d', { willReadFrequently: true })
+    }
+    const prepCtx = preprocessCtxRef.current
+    if (!prepCtx) throw new Error('2D context unavailable for preprocessing')
     prepCtx.drawImage(sourceEl, 0, 0, size, size)
     const imgData = prepCtx.getImageData(0, 0, size, size).data
-    const floatData = new Float32Array(3 * size * size)
-    for (let i = 0; i < size * size; i += 1) {
-      floatData[i] = imgData[i * 4] / 255
-      floatData[i + size * size] = imgData[i * 4 + 1] / 255
-      floatData[i + 2 * size * size] = imgData[i * 4 + 2] / 255
+    const bufferLength = 3 * size * size
+    if (!preprocessBufferRef.current || preprocessBufferSizeRef.current !== bufferLength) {
+      preprocessBufferRef.current = new Float32Array(bufferLength)
+      preprocessBufferSizeRef.current = bufferLength
     }
-    return new ort.Tensor('float32', floatData, [1, 3, size, size])
+    const floatData = preprocessBufferRef.current
+    const plane = size * size
+    for (let i = 0; i < plane; i += 1) {
+      floatData[i] = imgData[i * 4] / 255
+      floatData[i + plane] = imgData[i * 4 + 1] / 255
+      floatData[i + 2 * plane] = imgData[i * 4 + 2] / 255
+    }
+    return new ort.Tensor('float32', floatData.slice(), [1, 3, size, size])
   }
 
   const drawTensorToCanvas = (tensor, canvas, mirror = false) => {
     const h = tensor.dims[2]
     const w = tensor.dims[3]
-    const frame = document.createElement('canvas')
-    frame.width = w
-    frame.height = h
-    const frameCtx = frame.getContext('2d')
-    const imageData = frameCtx.createImageData(w, h)
+    if (!frameCanvasRef.current) frameCanvasRef.current = document.createElement('canvas')
+    const frame = frameCanvasRef.current
+    if (frame.width !== w) frame.width = w
+    if (frame.height !== h) frame.height = h
+    if (!frameCtxRef.current) frameCtxRef.current = frame.getContext('2d')
+    const frameCtx = frameCtxRef.current
+    if (!frameCtx) throw new Error('2D context unavailable for rendering')
+    const imageDataKey = `${w}x${h}`
+    if (!frameImageDataRef.current || frameImageDataKeyRef.current !== imageDataKey) {
+      frameImageDataRef.current = frameCtx.createImageData(w, h)
+      frameImageDataKeyRef.current = imageDataKey
+    }
+    const imageData = frameImageDataRef.current
     const data = tensor.data
     for (let i = 0; i < w * h; i += 1) {
       const p = i * 4
@@ -196,6 +263,7 @@ function App() {
     }
     frameCtx.putImageData(imageData, 0, 0)
     const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('2D context unavailable for output canvas')
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     if (mirror) {
       ctx.save()
@@ -213,12 +281,36 @@ function App() {
       setStatus(makeStatus('warning', t.status.loadModelFirst))
       return
     }
+    const ort = await loadOrtModule()
     const t0 = performance.now()
-    const inputTensor = preprocessToTensor(sourceEl, modelInputSize)
-    const feed = { [modelInputNameRef.current]: inputTensor }
-    const result = await sessionRef.current.run(feed)
+    let tensorSize = effectiveInferenceSize
+    let inputTensor = preprocessToTensor(sourceEl, tensorSize, ort)
+    let feed = { [modelInputNameRef.current]: inputTensor }
+    let result
+    try {
+      result = await sessionRef.current.run(feed)
+    } catch (error) {
+      if (tensorSize !== modelInputSize) {
+        tensorSize = modelInputSize
+        inputTensor = preprocessToTensor(sourceEl, tensorSize, ort)
+        feed = { [modelInputNameRef.current]: inputTensor }
+        result = await sessionRef.current.run(feed)
+        setStatus(makeStatus('warning', t.status.modelFixedInputFallback))
+      } else {
+        throw error
+      }
+    }
     drawTensorToCanvas(result[modelOutputNameRef.current], outputCanvas, mirror)
-    setProcessMs(Math.round(performance.now() - t0))
+    return Math.round(performance.now() - t0)
+  }
+
+  const flushRealtimeMetrics = (now, fps, latencyMs, force = false) => {
+    pendingFpsRef.current = fps
+    pendingProcessMsRef.current = latencyMs
+    if (!force && now - lastMetricsUpdateAtRef.current < METRICS_UPDATE_GAP_MS) return
+    lastMetricsUpdateAtRef.current = now
+    setCurrentFps(pendingFpsRef.current)
+    setProcessMs(pendingProcessMsRef.current)
   }
 
   const cleanupCamera = () => {
@@ -233,13 +325,16 @@ function App() {
     setRunning(false)
     setCurrentFps(0)
     setProcessMs(0)
+    lastMetricsUpdateAtRef.current = 0
+    pendingFpsRef.current = 0
+    pendingProcessMsRef.current = 0
     fpsTimesRef.current = []
     processingRef.current = false
   }
 
   const startOutputRecording = () => {
     const canvas = outputCanvasRef.current
-    if (!canvas || mediaRecorderRef.current) return
+    if (!canvas || mediaRecorderRef.current || typeof MediaRecorder === 'undefined') return
     if (recordedVideoUrlRef.current) {
       URL.revokeObjectURL(recordedVideoUrlRef.current)
       recordedVideoUrlRef.current = ''
@@ -307,11 +402,11 @@ function App() {
         processingRef.current = true
         try {
           lastInferAtRef.current = now
-          await runEnhanceOnElement(video, output, sourceMode === 'camera')
+          const processTime = await runEnhanceOnElement(video, output, sourceMode === 'camera')
           const times = fpsTimesRef.current
           times.push(now)
           while (times.length > 0 && now - times[0] > 1000) times.shift()
-          setCurrentFps(times.length)
+          flushRealtimeMetrics(now, times.length, processTime)
         } catch (error) {
           setStatus(makeStatus('error', t.status.realtimeFailed(error.message)))
         } finally {
@@ -343,6 +438,11 @@ function App() {
   const loadOnlineModel = async () => {
     const model = ONLINE_MODELS.find((item) => item.id === selectedOnlineModel)
     if (!model) return
+    if (onlineModelAbortRef.current) {
+      onlineModelAbortRef.current.abort()
+    }
+    const controller = new AbortController()
+    onlineModelAbortRef.current = controller
     try {
       setStatus(makeStatus('info', t.status.loadingOnlineModel(model.name)))
       const hasCacheApi = typeof window !== 'undefined' && 'caches' in window
@@ -351,13 +451,13 @@ function App() {
         const cache = await window.caches.open(MODEL_CACHE_NAME)
         response = await cache.match(model.url)
         if (!response) {
-          const fetched = await fetch(model.url)
+          const fetched = await fetch(model.url, { signal: controller.signal })
           if (!fetched.ok) throw new Error(`${fetched.status} ${fetched.statusText}`)
           await cache.put(model.url, fetched.clone())
           response = fetched
         }
       } else {
-        const fetched = await fetch(model.url)
+        const fetched = await fetch(model.url, { signal: controller.signal })
         if (!fetched.ok) throw new Error(`${fetched.status} ${fetched.statusText}`)
         response = fetched
       }
@@ -377,8 +477,16 @@ function App() {
         setStatus(makeStatus('success', t.status.onlineModelCached(model.name)))
       }
     } catch (error) {
+      if (error?.name === 'AbortError') {
+        setStatus(makeStatus('info', t.status.onlineModelLoadCancelled))
+        return
+      }
       sessionRef.current = null
       setStatus(makeStatus('error', t.status.onlineModelDownloadFailed(error.message)))
+    } finally {
+      if (onlineModelAbortRef.current === controller) {
+        onlineModelAbortRef.current = null
+      }
     }
   }
 
@@ -393,12 +501,17 @@ function App() {
     }
   }
 
-  const handleImageFile = async (event) => {
+  const handleImageFile = (event) => {
     const file = event.target.files?.[0]
     if (!file) return
+    if (imageObjectUrlRef.current) {
+      URL.revokeObjectURL(imageObjectUrlRef.current)
+      imageObjectUrlRef.current = ''
+    }
     const img = new Image()
     img.onload = () => {
       imageElementRef.current = img
+      syncCanvasSize(img.width, img.height)
       const inputCanvas = inputCanvasRef.current
       const outputCanvas = outputCanvasRef.current
       if (!inputCanvas || !outputCanvas) return
@@ -408,11 +521,13 @@ function App() {
       setStatus(makeStatus('success', t.status.imageLoaded))
     }
     img.onerror = () => setStatus(makeStatus('error', t.status.imageLoadFailed))
-    img.src = URL.createObjectURL(file)
+    const url = URL.createObjectURL(file)
+    imageObjectUrlRef.current = url
+    img.src = url
     event.target.value = ''
   }
 
-  const handleVideoFile = async (event) => {
+  const handleVideoFile = (event) => {
     const file = event.target.files?.[0]
     if (!file) return
     stopCamera()
@@ -427,6 +542,7 @@ function App() {
     video.src = url
     video.load()
     video.onloadedmetadata = () => {
+      syncCanvasSize(video.videoWidth, video.videoHeight)
       setVideoInfoText(`${video.videoWidth} x ${video.videoHeight} | ${Math.round(video.duration || 0)}s`)
       setStatus(makeStatus('success', t.status.videoLoaded))
     }
@@ -443,7 +559,8 @@ function App() {
     }
     try {
       setStatus(makeStatus('info', t.status.imageInferring))
-      await runEnhanceOnElement(img, output)
+      const processTime = await runEnhanceOnElement(img, output)
+      setProcessMs(processTime)
       setStatus(makeStatus('success', t.status.imageDone))
     } catch (error) {
       setStatus(makeStatus('error', t.status.imageInferFailed(error.message)))
@@ -472,6 +589,7 @@ function App() {
       const video = cameraVideoRef.current
       video.srcObject = stream
       await video.play()
+      syncCanvasSize(video.videoWidth, video.videoHeight)
       setRunning(true)
       setStatus(makeStatus('success', t.status.cameraStarted(maxFps)))
     } catch (error) {
@@ -503,6 +621,7 @@ function App() {
       const video = cameraVideoRef.current
       video.srcObject = stream
       await video.play()
+      syncCanvasSize(video.videoWidth, video.videoHeight)
       setRunning(true)
       setStatus(makeStatus('success', t.status.cameraSwitched))
     } catch (error) {
@@ -510,9 +629,9 @@ function App() {
     }
   }
 
-  const refreshCameraDevices = async () => {
+  const refreshCameraDevices = async (silent = false) => {
     if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
-      setStatus(makeStatus('error', t.status.mediaDevicesUnavailable))
+      if (!silent) setStatus(makeStatus('error', t.status.mediaDevicesUnavailable))
       return
     }
     try {
@@ -521,7 +640,7 @@ function App() {
       setCameraDevices(videos)
       if (!videos.length) {
         setSelectedCameraId('')
-        setStatus(makeStatus('warning', t.status.noCameraFound))
+        if (!silent) setStatus(makeStatus('warning', t.status.noCameraFound))
         return
       }
       if (!videos.some((d) => d.deviceId === selectedCameraId)) {
@@ -590,7 +709,7 @@ function App() {
 
   useEffect(() => {
     if (sourceMode === 'camera') {
-      refreshCameraDevices()
+      refreshCameraDevices(true)
     }
   }, [sourceMode])
 
@@ -598,11 +717,36 @@ function App() {
     () => () => {
       cleanupCamera()
       stopOutputRecording()
+      if (onlineModelAbortRef.current) onlineModelAbortRef.current.abort()
+      if (imageObjectUrlRef.current) URL.revokeObjectURL(imageObjectUrlRef.current)
       if (videoObjectUrlRef.current) URL.revokeObjectURL(videoObjectUrlRef.current)
       if (recordedVideoUrlRef.current) URL.revokeObjectURL(recordedVideoUrlRef.current)
     },
     []
   )
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      if (!document.fullscreenElement) setActiveFullscreen('')
+    }
+    document.addEventListener('fullscreenchange', onFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange)
+  }, [])
+
+  const toggleFullscreen = async (target) => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen()
+        return
+      }
+      const el = target === 'input' ? inputPanelRef.current : outputPanelRef.current
+      if (!el?.requestFullscreen) return
+      await el.requestFullscreen()
+      setActiveFullscreen(target)
+    } catch {
+      setStatus(makeStatus('warning', t.status.fullscreenUnavailable))
+    }
+  }
 
   const statusSeverity =
     status.level === 'error'
@@ -617,18 +761,18 @@ function App() {
     <ThemeProvider theme={theme}>
       <Box sx={{ minHeight: '100vh', background: 'linear-gradient(140deg, #e8edf5 0%, #f4f7fb 40%, #dee7f3 100%)' }}>
         <AppBar position="fixed" color="transparent" elevation={0} sx={{ backdropFilter: 'blur(8px)' }}>
-          <Toolbar sx={{ borderBottom: '1px solid #d0d8e5' }}>
+          <Toolbar sx={{ borderBottom: '1px solid #d0d8e5', minHeight: `${appBarHeight}px !important`, px: { xs: 1, sm: 2 } }}>
             {isMobile && (
               <Button variant="outlined" size="small" sx={{ mr: 1 }} onClick={() => setMobileDrawerOpen(true)}>
                 {t.ui.menu}
               </Button>
             )}
             <MemoryRoundedIcon sx={{ mr: 1 }} />
-            <Typography variant="h6" sx={{ fontWeight: 700 }}>{t.ui.appTitle}</Typography>
+            <Typography variant="h6" sx={{ fontWeight: 700, fontSize: { xs: '1rem', sm: '1.25rem' } }}>{t.ui.appTitle}</Typography>
             <Box sx={{ flexGrow: 1 }} />
-            <Chip label={`${t.ui.fps}: ${currentFps}`} color="secondary" />
-            <Box sx={{ width: 8 }} />
-            <Chip label={`${t.ui.latency}: ${processMs} ms`} color="primary" variant="outlined" />
+            {!isMobile && <Chip size="medium" label={`${t.ui.fps}: ${currentFps}`} color="secondary" />}
+            {!isMobile && <Box sx={{ width: 8 }} />}
+            {!isMobile && <Chip label={`${t.ui.latency}: ${processMs} ms`} color="primary" variant="outlined" />}
           </Toolbar>
         </AppBar>
 
@@ -640,16 +784,16 @@ function App() {
             width: drawerWidth,
             flexShrink: 0,
             '& .MuiDrawer-paper': {
-              width: drawerWidth,
+              width: { xs: 'min(92vw, 360px)', md: drawerWidth },
               boxSizing: 'border-box',
-              top: 64,
-              height: 'calc(100% - 64px)',
+              top: appBarHeight,
+              height: `calc(100% - ${appBarHeight}px)`,
               borderRight: '1px solid #d0d8e5',
               background: '#f8fbff'
             }
           }}
         >
-          <Stack spacing={2} sx={{ p: 2.5 }}>
+          <Stack spacing={2} sx={{ p: { xs: 1.5, sm: 2.5 } }}>
             <Typography variant="h5">{t.ui.panel}</Typography>
             <FormControl size="small" fullWidth>
               <InputLabel id="model-source-label">{t.ui.modelSource}</InputLabel>
@@ -748,7 +892,7 @@ function App() {
 
             <Divider />
 
-            <ButtonGroup fullWidth>
+            <ButtonGroup fullWidth orientation={isMobile ? 'vertical' : 'horizontal'}>
               <Button
                 variant={sourceMode === 'image' ? 'contained' : 'outlined'}
                 startIcon={<PhotoRoundedIcon />}
@@ -793,56 +937,149 @@ function App() {
               onChange={(_, value) => setMaxFps(Number(value))}
             />
 
+            <Typography gutterBottom>
+              {t.ui.inferenceScale}: {inferenceScale}% ({effectiveInferenceSize} x {effectiveInferenceSize})
+            </Typography>
+            <Slider
+              value={inferenceScale}
+              min={25}
+              max={100}
+              step={5}
+              valueLabelDisplay="auto"
+              onChange={(_, value) => setInferenceScale(Number(value))}
+            />
+
             <Alert severity={statusSeverity}>{status.text}</Alert>
             <Stack spacing={0.8} sx={{ mt: 0.5 }}>
               <Typography variant="caption" sx={{ fontWeight: 700 }}>{t.ui.envCheck}</Typography>
-              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} useFlexGap flexWrap="wrap" sx={{ width: '100%', minWidth: 0 }}>
                 <Chip
                   size="small"
                   color={envStatus.secure ? 'success' : 'warning'}
                   label={`${t.ui.secureContext}: ${envStatus.secure ? t.ui.ok : t.ui.unavailable}`}
+                  sx={{
+                    width: { xs: '100%', sm: 'auto' },
+                    maxWidth: '100%',
+                    height: 'auto',
+                    '& .MuiChip-label': {
+                      display: 'block',
+                      whiteSpace: 'normal',
+                      py: 0.5,
+                      lineHeight: 1.2
+                    }
+                  }}
                 />
                 <Chip
                   size="small"
                   color={envStatus.camera ? 'success' : 'warning'}
                   label={`${t.ui.cameraApi}: ${envStatus.camera ? t.ui.ok : t.ui.unavailable}`}
+                  sx={{
+                    width: { xs: '100%', sm: 'auto' },
+                    maxWidth: '100%',
+                    height: 'auto',
+                    '& .MuiChip-label': {
+                      display: 'block',
+                      whiteSpace: 'normal',
+                      py: 0.5,
+                      lineHeight: 1.2
+                    }
+                  }}
                 />
                 <Chip
                   size="small"
                   color={envStatus.cache ? 'success' : 'warning'}
                   label={`${t.ui.cacheApi}: ${envStatus.cache ? t.ui.ok : t.ui.unavailable}`}
+                  sx={{
+                    width: { xs: '100%', sm: 'auto' },
+                    maxWidth: '100%',
+                    height: 'auto',
+                    '& .MuiChip-label': {
+                      display: 'block',
+                      whiteSpace: 'normal',
+                      py: 0.5,
+                      lineHeight: 1.2
+                    }
+                  }}
                 />
                 <Chip
                   size="small"
                   color={envStatus.crypto ? 'success' : 'warning'}
                   label={`${t.ui.cryptoApi}: ${envStatus.crypto ? t.ui.ok : t.ui.unavailable}`}
+                  sx={{
+                    width: { xs: '100%', sm: 'auto' },
+                    maxWidth: '100%',
+                    height: 'auto',
+                    '& .MuiChip-label': {
+                      display: 'block',
+                      whiteSpace: 'normal',
+                      py: 0.5,
+                      lineHeight: 1.2
+                    }
+                  }}
                 />
               </Stack>
             </Stack>
           </Stack>
         </Drawer>
 
-        <Box sx={{ ml: { xs: 0, md: `${drawerWidth}px` }, pt: '80px', p: 2.5 }}>
+        <Box
+          sx={{
+            ml: { xs: 0, md: `${drawerWidth}px` },
+            pt: { xs: `${appBarHeight + 12}px`, md: '80px' },
+            p: { xs: 1.25, sm: 2.5 },
+            pb: { xs: 10, md: 2.5 }
+          }}
+        >
           <Stack direction={{ xs: 'column', lg: 'row' }} spacing={2.5}>
-            <Card sx={{ flex: 1, minHeight: 380 }}>
+            <Card sx={{ flex: 1, minHeight: { xs: 280, md: 380 } }}>
               <CardContent>
-                <Typography variant="h6" sx={{ mb: 1.5 }}>{t.ui.input}</Typography>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+                  <Typography variant="h6">{t.ui.input}</Typography>
+                  <Stack direction="row" spacing={0.5} alignItems="center">
+                    <IconButton
+                      size="small"
+                      color="primary"
+                      aria-label={activeFullscreen === 'input' ? t.ui.exitFullScreen : t.ui.fullScreen}
+                      title={activeFullscreen === 'input' ? t.ui.exitFullScreen : t.ui.fullScreen}
+                      onClick={() => toggleFullscreen('input')}
+                    >
+                      {activeFullscreen === 'input' ? <FullscreenExitRoundedIcon fontSize="small" /> : <FullscreenRoundedIcon fontSize="small" />}
+                    </IconButton>
+                    {isMobile && (
+                      <Button size="small" variant="text" onClick={() => setMobileInputOpen((v) => !v)}>
+                        {mobileInputOpen ? t.ui.hideSection : t.ui.showSection}
+                      </Button>
+                    )}
+                  </Stack>
+                </Stack>
 
-                {sourceMode === 'image' ? (
+                <Box ref={inputPanelRef} sx={{ background: '#f8fbff', p: activeFullscreen === 'input' ? 2 : 0, minHeight: activeFullscreen === 'input' ? '100vh' : 'auto' }}>
+                {(!isMobile || mobileInputOpen) && (sourceMode === 'image' ? (
                   <Stack spacing={1.5}>
                     <Button variant="outlined" onClick={() => imageInputRef.current?.click()}>{t.ui.chooseImage}</Button>
                     <input hidden ref={imageInputRef} type="file" accept="image/*" onChange={handleImageFile} />
                     <Typography variant="body2">{t.ui.size}: {imageSizeText}</Typography>
-                    <canvas ref={inputCanvasRef} width={640} height={420} style={{ width: '100%', borderRadius: 12, background: '#091320' }} />
+                    <canvas
+                      ref={inputCanvasRef}
+                      width={canvasSize.width}
+                      height={canvasSize.height}
+                      style={{
+                        width: '100%',
+                        height: 'auto',
+                        maxHeight: activeFullscreen === 'input' ? '82vh' : '52vh',
+                        borderRadius: 12,
+                        background: '#091320'
+                      }}
+                    />
                     <Button variant="contained" onClick={runImageEnhance}>{t.ui.runImage}</Button>
                   </Stack>
                 ) : sourceMode === 'camera' ? (
                   <Stack spacing={1.5}>
-                    <Stack direction="row" justifyContent="space-between" alignItems="center">
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }}>
                       <Typography variant="subtitle2">{t.ui.camera}</Typography>
                       <Button size="small" variant="outlined" onClick={switchCamera}>{t.ui.switchCamera}</Button>
                     </Stack>
-                    <Stack direction="row" spacing={1}>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
                       <FormControl size="small" fullWidth>
                         <InputLabel id="camera-list-label">{t.ui.cameraList}</InputLabel>
                         <Select
@@ -868,9 +1105,15 @@ function App() {
                       ref={cameraVideoRef}
                       playsInline
                       muted
-                      style={{ width: '100%', borderRadius: 12, background: '#091320', transform: 'scaleX(-1)' }}
+                      style={{
+                        width: '100%',
+                        maxHeight: activeFullscreen === 'input' ? '82vh' : '52vh',
+                        borderRadius: 12,
+                        background: '#091320',
+                        transform: 'scaleX(-1)'
+                      }}
                     />
-                    <Stack direction="row" spacing={1.5}>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
                       <Button variant="contained" onClick={startCamera} disabled={running}>{t.ui.startCamera}</Button>
                       <Button variant="outlined" onClick={stopCamera} disabled={!running}>{t.ui.stopCamera}</Button>
                     </Stack>
@@ -886,30 +1129,95 @@ function App() {
                       playsInline
                       controls
                       muted
-                      style={{ width: '100%', borderRadius: 12, background: '#091320' }}
+                      style={{
+                        width: '100%',
+                        maxHeight: activeFullscreen === 'input' ? '82vh' : '52vh',
+                        borderRadius: 12,
+                        background: '#091320'
+                      }}
                     />
-                    <Stack direction="row" spacing={1.5}>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
                       <Button variant="contained" onClick={startVideoInference} disabled={running}>{t.ui.startVideo}</Button>
                       <Button variant="outlined" onClick={stopVideoInference} disabled={!running}>{t.ui.stopInfer}</Button>
                     </Stack>
                     <LinearProgress variant="determinate" value={Math.min(100, (currentFps / Math.max(maxFps, 1)) * 100)} />
                   </Stack>
-                )}
+                ))}
+                </Box>
               </CardContent>
             </Card>
 
-            <Card sx={{ flex: 1, minHeight: 380 }}>
+            <Card sx={{ flex: 1, minHeight: { xs: 280, md: 380 } }}>
               <CardContent>
-                <Typography variant="h6" sx={{ mb: 1.5 }}>{t.ui.output}</Typography>
-                <Typography variant="body2" sx={{ mb: 1 }}>{t.ui.modelSize}: {modelInputSize} x {modelInputSize}</Typography>
-                <canvas ref={outputCanvasRef} width={640} height={420} style={{ width: '100%', borderRadius: 12, background: '#03101d' }} />
-                <Button sx={{ mt: 1.5 }} variant="contained" onClick={downloadEnhancedOutput}>
-                  {sourceMode === 'video' ? t.ui.dlVideo : t.ui.dlImage}
-                </Button>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+                  <Typography variant="h6">{t.ui.output}</Typography>
+                  <Stack direction="row" spacing={0.5} alignItems="center">
+                    <IconButton
+                      size="small"
+                      color="primary"
+                      aria-label={activeFullscreen === 'output' ? t.ui.exitFullScreen : t.ui.fullScreen}
+                      title={activeFullscreen === 'output' ? t.ui.exitFullScreen : t.ui.fullScreen}
+                      onClick={() => toggleFullscreen('output')}
+                    >
+                      {activeFullscreen === 'output' ? <FullscreenExitRoundedIcon fontSize="small" /> : <FullscreenRoundedIcon fontSize="small" />}
+                    </IconButton>
+                    {isMobile && (
+                      <Button size="small" variant="text" onClick={() => setMobileOutputOpen((v) => !v)}>
+                        {mobileOutputOpen ? t.ui.hideSection : t.ui.showSection}
+                      </Button>
+                    )}
+                  </Stack>
+                </Stack>
+                <Box ref={outputPanelRef} sx={{ background: '#f8fbff', p: activeFullscreen === 'output' ? 2 : 0, minHeight: activeFullscreen === 'output' ? '100vh' : 'auto' }}>
+                {(!isMobile || mobileOutputOpen) && (
+                  <>
+                    <Typography variant="body2" sx={{ mb: 1 }}>{t.ui.modelSize}: {modelInputSize} x {modelInputSize}</Typography>
+                    <canvas
+                      ref={outputCanvasRef}
+                      width={canvasSize.width}
+                      height={canvasSize.height}
+                      style={{
+                        width: '100%',
+                        height: 'auto',
+                        maxHeight: activeFullscreen === 'output' ? '82vh' : '52vh',
+                        borderRadius: 12,
+                        background: '#03101d'
+                      }}
+                    />
+                    <Button sx={{ mt: 1.5 }} variant="contained" onClick={downloadEnhancedOutput}>
+                      {sourceMode === 'video' ? t.ui.dlVideo : t.ui.dlImage}
+                    </Button>
+                  </>
+                )}
+                </Box>
               </CardContent>
             </Card>
           </Stack>
         </Box>
+
+        {isMobile && (
+          <Box
+            sx={{
+              position: 'fixed',
+              left: 10,
+              right: 10,
+              bottom: 10,
+              zIndex: 1300,
+              border: '1px solid #ccd7e8',
+              borderRadius: 999,
+              px: 1,
+              py: 0.75,
+              background: 'rgba(248, 251, 255, 0.94)',
+              backdropFilter: 'blur(10px)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              gap: 1
+            }}
+          >
+            <Chip size="small" label={`${t.ui.fps}: ${currentFps}`} color="secondary" />
+            <Chip size="small" label={`${t.ui.latency}: ${processMs} ms`} color="primary" variant="outlined" />
+          </Box>
+        )}
       </Box>
     </ThemeProvider>
   )
