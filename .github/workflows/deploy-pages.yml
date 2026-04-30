@@ -127,8 +127,24 @@ jobs:
             ls -la "$GITHUB_WORKSPACE"
             exit 1
           fi
+          echo "Uploading from: $DIST_DIR"
           if [ -n "$OSS_ENDPOINT" ]; then
-            ossutil sync "$DIST_DIR" "oss://$OSS_BUCKET/" --delete --force --region "$OSS_REGION" --endpoint "$OSS_ENDPOINT"
+            ossutil ls "oss://$OSS_BUCKET/" --region "$OSS_REGION" --endpoint "$OSS_ENDPOINT" --loglevel debug
           else
-            ossutil sync "$DIST_DIR" "oss://$OSS_BUCKET/" --delete --force --region "$OSS_REGION"
+            ossutil ls "oss://$OSS_BUCKET/" --region "$OSS_REGION" --loglevel debug
           fi
+          if [ -n "$OSS_ENDPOINT" ]; then
+            ossutil cp "$DIST_DIR/" "oss://$OSS_BUCKET/" -r --force --region "$OSS_REGION" --endpoint "$OSS_ENDPOINT" --loglevel debug
+          else
+            ossutil cp "$DIST_DIR/" "oss://$OSS_BUCKET/" -r --force --region "$OSS_REGION" --loglevel debug
+          fi
+
+      - name: Upload ossutil report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ossutil-report
+          path: |
+            ossutil_output
+            /home/runner/work/${{ github.event.repository.name }}/${{ github.event.repository.name }}/ossutil_output
+          if-no-files-found: ignore
