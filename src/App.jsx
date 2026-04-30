@@ -135,6 +135,8 @@ function App() {
   const onlineModelAbortRef = useRef(null)
   const fixedInputSizeRef = useRef(null)
   const renderFallbackWarnedRef = useRef(false)
+  const modelBufferCacheRef = useRef(new Map())
+  const modelCacheHandleRef = useRef(null)
 
   const providerOptions = useMemo(() => ['webgpu', 'webgl', 'wasm'], [])
   const t = useMemo(() => getMessages(lang), [lang])
@@ -159,9 +161,19 @@ function App() {
   const loadOrtModule = async () => {
     if (!ortModuleRef.current) {
       const mod = await import('onnxruntime-web')
+      mod.env.wasm.numThreads = 1
+      mod.env.wasm.proxy = false
       ortModuleRef.current = mod
     }
     return ortModuleRef.current
+  }
+
+  const getModelCacheHandle = async () => {
+    if (typeof window === 'undefined' || !('caches' in window)) return null
+    if (!modelCacheHandleRef.current) {
+      modelCacheHandleRef.current = await window.caches.open(MODEL_CACHE_NAME)
+    }
+    return modelCacheHandleRef.current
   }
 
   const createSessionFromBuffer = async (buffer, displayName) => {
@@ -548,15 +560,22 @@ function App() {
     onlineModelAbortRef.current = controller
     try {
       setStatus(makeStatus('info', t.status.loadingOnlineModel(model.name)))
-      const hasCacheApi = typeof window !== 'undefined' && 'caches' in window
+      const inMemory = modelBufferCacheRef.current.get(model.id)
+      if (inMemory?.buffer) {
+        await createSessionFromBuffer(inMemory.buffer.slice(0), model.name)
+        setStatus(makeStatus('success', t.status.onlineModelCached(model.name)))
+        return
+      }
+
+      const cacheHandle = await getModelCacheHandle()
+      const hasCacheApi = !!cacheHandle
       let response = null
       if (hasCacheApi) {
-        const cache = await window.caches.open(MODEL_CACHE_NAME)
-        response = await cache.match(model.url)
+        response = await cacheHandle.match(model.url)
         if (!response) {
           const fetched = await fetch(model.url, { signal: controller.signal })
           if (!fetched.ok) throw new Error(`${fetched.status} ${fetched.statusText}`)
-          await cache.put(model.url, fetched.clone())
+          await cacheHandle.put(model.url, fetched.clone())
           response = fetched
         }
       } else {
@@ -568,11 +587,14 @@ function App() {
       const valid = await verifySha256(buffer, model.sha256)
       if (valid === false) {
         if (hasCacheApi) {
-          const cache = await window.caches.open(MODEL_CACHE_NAME)
-          await cache.delete(model.url)
+          await cacheHandle.delete(model.url)
         }
         throw new Error(t.status.hashMismatch)
       }
+      modelBufferCacheRef.current.set(model.id, {
+        buffer: buffer.slice(0),
+        verified: valid !== false
+      })
       await createSessionFromBuffer(buffer, model.name)
       if (valid === null) {
         setStatus(makeStatus('warning', `${t.status.onlineModelCached(model.name)} (${t.status.integritySkipped})`))
@@ -598,11 +620,49 @@ function App() {
       if (typeof window !== 'undefined' && 'caches' in window) {
         await window.caches.delete(MODEL_CACHE_NAME)
       }
+      modelCacheHandleRef.current = null
+      modelBufferCacheRef.current.clear()
       setStatus(makeStatus('success', t.status.modelCacheCleared))
     } catch (error) {
       setStatus(makeStatus('error', t.status.modelCacheClearFailed(error.message)))
     }
   }
+
+  useEffect(() => {
+    let cancelled = false
+    const model = ONLINE_MODELS.find((item) => item.id === selectedOnlineModel)
+    if (!model || modelBufferCacheRef.current.has(model.id)) return () => {
+      cancelled = true
+    }
+
+    const run = async () => {
+      try {
+        const cacheHandle = await getModelCacheHandle()
+        if (!cacheHandle || cancelled) return
+        const cached = await cacheHandle.match(model.url)
+        if (cached || cancelled) return
+        const fetched = await fetch(model.url, { cache: 'force-cache' })
+        if (!fetched.ok || cancelled) return
+        await cacheHandle.put(model.url, fetched.clone())
+      } catch {
+        // Silent prefetch best effort.
+      }
+    }
+
+    const idleId =
+      typeof window !== 'undefined' && window.requestIdleCallback
+        ? window.requestIdleCallback(run, { timeout: 1500 })
+        : window.setTimeout(run, 800)
+
+    return () => {
+      cancelled = true
+      if (typeof window !== 'undefined' && window.cancelIdleCallback && typeof idleId === 'number') {
+        window.cancelIdleCallback(idleId)
+      } else {
+        clearTimeout(idleId)
+      }
+    }
+  }, [selectedOnlineModel])
 
   const handleImageFile = (event) => {
     const file = event.target.files?.[0]
