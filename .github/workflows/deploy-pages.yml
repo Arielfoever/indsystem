@@ -85,8 +85,8 @@ jobs:
         run: |
           curl -fSL -o ossutil.zip "https://gosspublic.alicdn.com/ossutil/v2/2.2.2/ossutil-2.2.2-linux-amd64.zip?spm=a2c4g.11186623.0.0.600a3236f8lUH5&file=ossutil-2.2.2-linux-amd64.zip"
           unzip -q ossutil.zip
-          chmod +x ossutil-v2.2.2-linux-amd64/ossutil
-          sudo mv ossutil-v2.2.2-linux-amd64/ossutil /usr/local/bin/ossutil
+          chmod +x ossutil-2.2.2-linux-amd64/ossutil
+          sudo mv ossutil-2.2.2-linux-amd64/ossutil /usr/local/bin/ossutil
 
       - name: Configure ossutil
         env:
