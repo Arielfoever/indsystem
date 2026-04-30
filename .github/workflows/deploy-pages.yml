@@ -58,6 +58,12 @@ jobs:
         with:
           path: dist
 
+      - name: Upload OSS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-oss
+          path: dist
+
   deploypages:
     environment:
       name: github-pages
@@ -78,7 +84,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: github-pages
+          name: dist-oss
           path: $GITHUB_WORKSPACE/dist
 
       - name: Install ossutil 2.2.2
