@@ -82,6 +82,7 @@ function App() {
   const [imageDownloadFormat, setImageDownloadFormat] = useState('png')
   const [videoDownloadFormat, setVideoDownloadFormat] = useState('mp4')
   const [canvasSize, setCanvasSize] = useState({ width: 640, height: 420 })
+  const [sourceDownscale, setSourceDownscale] = useState(100)
   const [inferenceScale, setInferenceScale] = useState(100)
   const [mobileInputOpen, setMobileInputOpen] = useState(true)
   const [mobileOutputOpen, setMobileOutputOpen] = useState(true)
@@ -120,6 +121,8 @@ function App() {
   const frameCtxRef = useRef(null)
   const frameImageDataRef = useRef(null)
   const frameImageDataKeyRef = useRef('')
+  const sourceScaleCanvasRef = useRef(null)
+  const sourceScaleCtxRef = useRef(null)
   const lastMetricsUpdateAtRef = useRef(0)
   const pendingFpsRef = useRef(0)
   const pendingProcessMsRef = useRef(0)
@@ -223,7 +226,31 @@ function App() {
     }
     const prepCtx = preprocessCtxRef.current
     if (!prepCtx) throw new Error('2D context unavailable for preprocessing')
-    prepCtx.drawImage(sourceEl, 0, 0, size, size)
+
+    const sourceWidth = sourceEl.videoWidth || sourceEl.naturalWidth || sourceEl.width || size
+    const sourceHeight = sourceEl.videoHeight || sourceEl.naturalHeight || sourceEl.height || size
+    const scaleRatio = Math.max(0.1, Math.min(1, sourceDownscale / 100))
+    const scaledWidth = Math.max(1, Math.round(sourceWidth * scaleRatio))
+    const scaledHeight = Math.max(1, Math.round(sourceHeight * scaleRatio))
+
+    if (scaleRatio < 0.999) {
+      if (!sourceScaleCanvasRef.current) {
+        sourceScaleCanvasRef.current = document.createElement('canvas')
+      }
+      const sourceScaleCanvas = sourceScaleCanvasRef.current
+      if (sourceScaleCanvas.width !== scaledWidth) sourceScaleCanvas.width = scaledWidth
+      if (sourceScaleCanvas.height !== scaledHeight) sourceScaleCanvas.height = scaledHeight
+      if (!sourceScaleCtxRef.current) {
+        sourceScaleCtxRef.current = sourceScaleCanvas.getContext('2d', { willReadFrequently: true })
+      }
+      const sourceScaleCtx = sourceScaleCtxRef.current
+      if (!sourceScaleCtx) throw new Error('2D context unavailable for source downscale')
+      sourceScaleCtx.drawImage(sourceEl, 0, 0, scaledWidth, scaledHeight)
+      prepCtx.drawImage(sourceScaleCanvas, 0, 0, size, size)
+    } else {
+      prepCtx.drawImage(sourceEl, 0, 0, size, size)
+    }
+
     const imgData = prepCtx.getImageData(0, 0, size, size).data
     const bufferLength = 3 * size * size
     if (!preprocessBufferRef.current || preprocessBufferSizeRef.current !== bufferLength) {
@@ -993,6 +1020,16 @@ function App() {
               step={5}
               valueLabelDisplay="auto"
               onChange={(_, value) => setInferenceScale(Number(value))}
+            />
+
+            <Typography gutterBottom>{t.ui.sourceDownscale}: {sourceDownscale}%</Typography>
+            <Slider
+              value={sourceDownscale}
+              min={25}
+              max={100}
+              step={5}
+              valueLabelDisplay="auto"
+              onChange={(_, value) => setSourceDownscale(Number(value))}
             />
 
             <Alert severity={statusSeverity}>{status.text}</Alert>
