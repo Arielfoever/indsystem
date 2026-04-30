@@ -136,6 +136,7 @@ function App() {
   const fixedInputSizeRef = useRef(null)
   const renderFallbackWarnedRef = useRef(false)
   const modelBufferCacheRef = useRef(new Map())
+  const localModelBufferCacheRef = useRef(new Map())
   const modelCacheHandleRef = useRef(null)
 
   const providerOptions = useMemo(() => ['webgpu', 'webgl', 'wasm'], [])
@@ -174,6 +175,46 @@ function App() {
       modelCacheHandleRef.current = await window.caches.open(MODEL_CACHE_NAME)
     }
     return modelCacheHandleRef.current
+  }
+
+  const fetchOnlineModelBuffer = async (model, signal) => {
+    const inMemory = modelBufferCacheRef.current.get(model.id)
+    if (inMemory?.buffer) {
+      return inMemory.buffer
+    }
+
+    const cacheHandle = await getModelCacheHandle()
+    const hasCacheApi = !!cacheHandle
+    let response = null
+    if (hasCacheApi) {
+      response = await cacheHandle.match(model.url)
+      if (!response) {
+        const fetched = await fetch(model.url, { signal })
+        if (!fetched.ok) throw new Error(`${fetched.status} ${fetched.statusText}`)
+        await cacheHandle.put(model.url, fetched.clone())
+        response = fetched
+      }
+    } else {
+      const fetched = await fetch(model.url, { signal })
+      if (!fetched.ok) throw new Error(`${fetched.status} ${fetched.statusText}`)
+      response = fetched
+    }
+
+    const buffer = await response.arrayBuffer()
+    const valid = await verifySha256(buffer, model.sha256)
+    if (valid === false) {
+      if (hasCacheApi) {
+        await cacheHandle.delete(model.url)
+      }
+      throw new Error(t.status.hashMismatch)
+    }
+
+    modelBufferCacheRef.current.set(model.id, {
+      buffer,
+      verified: valid !== false
+    })
+
+    return buffer
   }
 
   const createSessionFromBuffer = async (buffer, displayName) => {
@@ -539,7 +580,12 @@ function App() {
     if (!file) return
     try {
       setStatus(makeStatus('info', t.status.loadingModel(file.name)))
-      const buffer = await file.arrayBuffer()
+      const cacheKey = `${file.name}:${file.size}:${file.lastModified}`
+      const cachedBuffer = localModelBufferCacheRef.current.get(cacheKey)
+      const buffer = cachedBuffer || (await Promise.all([file.arrayBuffer(), loadOrtModule()]).then(([buf]) => buf))
+      if (!cachedBuffer) {
+        localModelBufferCacheRef.current.set(cacheKey, buffer)
+      }
       await createSessionFromBuffer(buffer, file.name)
       setStatus(makeStatus('success', t.status.modelLoaded(provider)))
     } catch (error) {
@@ -560,43 +606,13 @@ function App() {
     onlineModelAbortRef.current = controller
     try {
       setStatus(makeStatus('info', t.status.loadingOnlineModel(model.name)))
-      const inMemory = modelBufferCacheRef.current.get(model.id)
-      if (inMemory?.buffer) {
-        await createSessionFromBuffer(inMemory.buffer.slice(0), model.name)
-        setStatus(makeStatus('success', t.status.onlineModelCached(model.name)))
-        return
-      }
-
-      const cacheHandle = await getModelCacheHandle()
-      const hasCacheApi = !!cacheHandle
-      let response = null
-      if (hasCacheApi) {
-        response = await cacheHandle.match(model.url)
-        if (!response) {
-          const fetched = await fetch(model.url, { signal: controller.signal })
-          if (!fetched.ok) throw new Error(`${fetched.status} ${fetched.statusText}`)
-          await cacheHandle.put(model.url, fetched.clone())
-          response = fetched
-        }
-      } else {
-        const fetched = await fetch(model.url, { signal: controller.signal })
-        if (!fetched.ok) throw new Error(`${fetched.status} ${fetched.statusText}`)
-        response = fetched
-      }
-      const buffer = await response.arrayBuffer()
-      const valid = await verifySha256(buffer, model.sha256)
-      if (valid === false) {
-        if (hasCacheApi) {
-          await cacheHandle.delete(model.url)
-        }
-        throw new Error(t.status.hashMismatch)
-      }
-      modelBufferCacheRef.current.set(model.id, {
-        buffer: buffer.slice(0),
-        verified: valid !== false
-      })
+      const buffer = await fetchOnlineModelBuffer(model, controller.signal)
       await createSessionFromBuffer(buffer, model.name)
-      if (valid === null) {
+
+      const entry = modelBufferCacheRef.current.get(model.id)
+      if (entry?.verified === false) {
+        setStatus(makeStatus('warning', `${t.status.onlineModelCached(model.name)} (${t.status.integritySkipped})`))
+      } else if (entry && typeof entry.verified === 'boolean' && !entry.verified) {
         setStatus(makeStatus('warning', `${t.status.onlineModelCached(model.name)} (${t.status.integritySkipped})`))
       } else {
         setStatus(makeStatus('success', t.status.onlineModelCached(model.name)))
@@ -630,6 +646,27 @@ function App() {
 
   useEffect(() => {
     let cancelled = false
+    const run = async () => {
+      try {
+        await loadOrtModule()
+        if (cancelled) return
+        const model = ONLINE_MODELS.find((item) => item.id === selectedOnlineModel)
+        if (!model) return
+        await fetchOnlineModelBuffer(model)
+      } catch {
+        // Warmup is best effort.
+      }
+    }
+
+    const timerId = window.setTimeout(run, 200)
+    return () => {
+      cancelled = true
+      clearTimeout(timerId)
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
     const model = ONLINE_MODELS.find((item) => item.id === selectedOnlineModel)
     if (!model || modelBufferCacheRef.current.has(model.id)) return () => {
       cancelled = true
@@ -637,13 +674,7 @@ function App() {
 
     const run = async () => {
       try {
-        const cacheHandle = await getModelCacheHandle()
-        if (!cacheHandle || cancelled) return
-        const cached = await cacheHandle.match(model.url)
-        if (cached || cancelled) return
-        const fetched = await fetch(model.url, { cache: 'force-cache' })
-        if (!fetched.ok || cancelled) return
-        await cacheHandle.put(model.url, fetched.clone())
+        await fetchOnlineModelBuffer(model)
       } catch {
         // Silent prefetch best effort.
       }
