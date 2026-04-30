@@ -84,6 +84,7 @@ function App() {
   const [canvasSize, setCanvasSize] = useState({ width: 640, height: 420 })
   const [sourceDownscale, setSourceDownscale] = useState(100)
   const [inferenceScale, setInferenceScale] = useState(100)
+  const [renderPath, setRenderPath] = useState('putImageData')
   const [mobileInputOpen, setMobileInputOpen] = useState(true)
   const [mobileOutputOpen, setMobileOutputOpen] = useState(true)
   const [activeFullscreen, setActiveFullscreen] = useState('')
@@ -123,6 +124,8 @@ function App() {
   const frameImageDataKeyRef = useRef('')
   const sourceScaleCanvasRef = useRef(null)
   const sourceScaleCtxRef = useRef(null)
+  const offscreenCanvasRef = useRef(null)
+  const offscreenCtxRef = useRef(null)
   const lastMetricsUpdateAtRef = useRef(0)
   const pendingFpsRef = useRef(0)
   const pendingProcessMsRef = useRef(0)
@@ -130,6 +133,8 @@ function App() {
   const lastAutoFpsUpdateAtRef = useRef(0)
   const ortModuleRef = useRef(null)
   const onlineModelAbortRef = useRef(null)
+  const fixedInputSizeRef = useRef(null)
+  const renderFallbackWarnedRef = useRef(false)
 
   const providerOptions = useMemo(() => ['webgpu', 'webgl', 'wasm'], [])
   const t = useMemo(() => getMessages(lang), [lang])
@@ -139,6 +144,10 @@ function App() {
     return Math.max(64, Math.min(modelInputSize, snapped))
   }, [inferenceScale, modelInputSize])
   const effectiveMaxFps = fpsMode === 'auto' ? autoMaxFps : maxFps
+  const canUseBitmapPath = useMemo(() => {
+    if (typeof window === 'undefined') return false
+    return typeof window.OffscreenCanvas !== 'undefined' && typeof window.createImageBitmap === 'function'
+  }, [])
   const envStatus = useMemo(() => {
     const secure = typeof window !== 'undefined' ? window.isSecureContext : false
     const camera = typeof navigator !== 'undefined' && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
@@ -166,6 +175,7 @@ function App() {
     const dims = session.inputMetadata[modelInputNameRef.current]?.dimensions || []
     const inferred = Number(dims[2])
     if (Number.isFinite(inferred) && inferred > 0) setModelInputSize(inferred)
+    fixedInputSizeRef.current = null
     setModelName(displayName)
   }
 
@@ -245,7 +255,11 @@ function App() {
       }
       const sourceScaleCtx = sourceScaleCtxRef.current
       if (!sourceScaleCtx) throw new Error('2D context unavailable for source downscale')
+      sourceScaleCtx.imageSmoothingEnabled = true
+      sourceScaleCtx.imageSmoothingQuality = 'low'
       sourceScaleCtx.drawImage(sourceEl, 0, 0, scaledWidth, scaledHeight)
+      prepCtx.imageSmoothingEnabled = true
+      prepCtx.imageSmoothingQuality = 'low'
       prepCtx.drawImage(sourceScaleCanvas, 0, 0, size, size)
     } else {
       prepCtx.drawImage(sourceEl, 0, 0, size, size)
@@ -267,17 +281,33 @@ function App() {
     return new ort.Tensor('float32', floatData, [1, 3, size, size])
   }
 
-  const drawTensorToCanvas = (tensor, canvas, mirror = false) => {
+  const drawTensorToCanvas = async (tensor, canvas, mirror = false) => {
     const h = tensor.dims[2]
     const w = tensor.dims[3]
     const plane = w * h
-    if (!frameCanvasRef.current) frameCanvasRef.current = document.createElement('canvas')
-    const frame = frameCanvasRef.current
-    if (frame.width !== w) frame.width = w
-    if (frame.height !== h) frame.height = h
-    if (!frameCtxRef.current) frameCtxRef.current = frame.getContext('2d')
-    const frameCtx = frameCtxRef.current
-    if (!frameCtx) throw new Error('2D context unavailable for rendering')
+    const useBitmapPath = renderPath === 'imageBitmap' && canUseBitmapPath
+    let frameCtx
+    let frame
+    if (useBitmapPath) {
+      if (!offscreenCanvasRef.current || offscreenCanvasRef.current.width !== w || offscreenCanvasRef.current.height !== h) {
+        offscreenCanvasRef.current = new window.OffscreenCanvas(w, h)
+        offscreenCtxRef.current = offscreenCanvasRef.current.getContext('2d')
+      }
+      frame = offscreenCanvasRef.current
+      frameCtx = offscreenCtxRef.current
+    } else {
+      if (renderPath === 'imageBitmap' && !canUseBitmapPath && !renderFallbackWarnedRef.current) {
+        renderFallbackWarnedRef.current = true
+        setStatus(makeStatus('warning', t.status.imageBitmapUnsupported))
+      }
+      if (!frameCanvasRef.current) frameCanvasRef.current = document.createElement('canvas')
+      frame = frameCanvasRef.current
+      if (frame.width !== w) frame.width = w
+      if (frame.height !== h) frame.height = h
+      if (!frameCtxRef.current) frameCtxRef.current = frame.getContext('2d')
+      frameCtx = frameCtxRef.current
+    }
+    if (!frameCtx || !frame) throw new Error('2D context unavailable for rendering')
     const imageDataKey = `${w}x${h}`
     if (!frameImageDataRef.current || frameImageDataKeyRef.current !== imageDataKey) {
       frameImageDataRef.current = frameCtx.createImageData(w, h)
@@ -306,6 +336,20 @@ function App() {
     const ctx = canvas.getContext('2d')
     if (!ctx) throw new Error('2D context unavailable for output canvas')
     ctx.clearRect(0, 0, canvas.width, canvas.height)
+    if (useBitmapPath) {
+      const bitmap = await window.createImageBitmap(frame)
+      if (mirror) {
+        ctx.save()
+        ctx.translate(canvas.width, 0)
+        ctx.scale(-1, 1)
+        ctx.drawImage(bitmap, 0, 0, w, h, 0, 0, canvas.width, canvas.height)
+        ctx.restore()
+      } else {
+        ctx.drawImage(bitmap, 0, 0, w, h, 0, 0, canvas.width, canvas.height)
+      }
+      if (typeof bitmap.close === 'function') bitmap.close()
+      return
+    }
     if (mirror) {
       ctx.save()
       ctx.translate(canvas.width, 0)
@@ -324,7 +368,7 @@ function App() {
     }
     const ort = await loadOrtModule()
     const t0 = performance.now()
-    let tensorSize = effectiveInferenceSize
+    let tensorSize = fixedInputSizeRef.current || effectiveInferenceSize
     let inputTensor = preprocessToTensor(sourceEl, tensorSize, ort)
     let feed = { [modelInputNameRef.current]: inputTensor }
     let result
@@ -336,12 +380,15 @@ function App() {
         inputTensor = preprocessToTensor(sourceEl, tensorSize, ort)
         feed = { [modelInputNameRef.current]: inputTensor }
         result = await sessionRef.current.run(feed)
-        setStatus(makeStatus('warning', t.status.modelFixedInputFallback))
+        if (!fixedInputSizeRef.current) {
+          fixedInputSizeRef.current = modelInputSize
+          setStatus(makeStatus('warning', t.status.modelFixedInputFallback))
+        }
       } else {
         throw error
       }
     }
-    drawTensorToCanvas(result[modelOutputNameRef.current], outputCanvas, mirror)
+    await drawTensorToCanvas(result[modelOutputNameRef.current], outputCanvas, mirror)
     return Math.round(performance.now() - t0)
   }
 
@@ -943,6 +990,19 @@ function App() {
               >
                 <MenuItem value="mp4">MP4</MenuItem>
                 <MenuItem value="webm">WEBM</MenuItem>
+              </Select>
+            </FormControl>
+
+            <FormControl size="small" fullWidth>
+              <InputLabel id="render-path-label">{t.ui.renderPath}</InputLabel>
+              <Select
+                labelId="render-path-label"
+                value={renderPath}
+                label={t.ui.renderPath}
+                onChange={(e) => setRenderPath(e.target.value)}
+              >
+                <MenuItem value="putImageData">{t.ui.renderPathPutImageData}</MenuItem>
+                <MenuItem value="imageBitmap">{t.ui.renderPathImageBitmap}</MenuItem>
               </Select>
             </FormControl>
 
