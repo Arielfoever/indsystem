@@ -52,8 +52,6 @@ const theme = createTheme({
 
 const makeStatus = (level, text) => ({ level, text })
 
-const clampByte = (value) => Math.max(0, Math.min(255, Math.round(value)))
-
 function App() {
   const [lang, setLang] = useState(() => {
     const saved = window.localStorage.getItem('lang')
@@ -75,6 +73,8 @@ function App() {
   const [status, setStatus] = useState(makeStatus('info', ''))
   const [running, setRunning] = useState(false)
   const [maxFps, setMaxFps] = useState(8)
+  const [fpsMode, setFpsMode] = useState('manual')
+  const [autoMaxFps, setAutoMaxFps] = useState(8)
   const [currentFps, setCurrentFps] = useState(0)
   const [processMs, setProcessMs] = useState(0)
   const [imageSizeText, setImageSizeText] = useState('-')
@@ -123,6 +123,8 @@ function App() {
   const lastMetricsUpdateAtRef = useRef(0)
   const pendingFpsRef = useRef(0)
   const pendingProcessMsRef = useRef(0)
+  const autoFpsEstimateRef = useRef(8)
+  const lastAutoFpsUpdateAtRef = useRef(0)
   const ortModuleRef = useRef(null)
   const onlineModelAbortRef = useRef(null)
 
@@ -133,6 +135,7 @@ function App() {
     const snapped = Math.round(scaled / 8) * 8
     return Math.max(64, Math.min(modelInputSize, snapped))
   }, [inferenceScale, modelInputSize])
+  const effectiveMaxFps = fpsMode === 'auto' ? autoMaxFps : maxFps
   const envStatus = useMemo(() => {
     const secure = typeof window !== 'undefined' ? window.isSecureContext : false
     const camera = typeof navigator !== 'undefined' && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
@@ -234,12 +237,13 @@ function App() {
       floatData[i + plane] = imgData[i * 4 + 1] / 255
       floatData[i + 2 * plane] = imgData[i * 4 + 2] / 255
     }
-    return new ort.Tensor('float32', floatData.slice(), [1, 3, size, size])
+    return new ort.Tensor('float32', floatData, [1, 3, size, size])
   }
 
   const drawTensorToCanvas = (tensor, canvas, mirror = false) => {
     const h = tensor.dims[2]
     const w = tensor.dims[3]
+    const plane = w * h
     if (!frameCanvasRef.current) frameCanvasRef.current = document.createElement('canvas')
     const frame = frameCanvasRef.current
     if (frame.width !== w) frame.width = w
@@ -254,12 +258,22 @@ function App() {
     }
     const imageData = frameImageDataRef.current
     const data = tensor.data
-    for (let i = 0; i < w * h; i += 1) {
+    const rgba = imageData.data
+    for (let i = 0; i < plane; i += 1) {
       const p = i * 4
-      imageData.data[p] = clampByte(data[i] * 255)
-      imageData.data[p + 1] = clampByte(data[i + w * h] * 255)
-      imageData.data[p + 2] = clampByte(data[i + 2 * w * h] * 255)
-      imageData.data[p + 3] = 255
+      let r = (data[i] * 255 + 0.5) | 0
+      let g = (data[i + plane] * 255 + 0.5) | 0
+      let b = (data[i + 2 * plane] * 255 + 0.5) | 0
+      if (r < 0) r = 0
+      else if (r > 255) r = 255
+      if (g < 0) g = 0
+      else if (g > 255) g = 255
+      if (b < 0) b = 0
+      else if (b > 255) b = 255
+      rgba[p] = r
+      rgba[p + 1] = g
+      rgba[p + 2] = b
+      rgba[p + 3] = 255
     }
     frameCtx.putImageData(imageData, 0, 0)
     const ctx = canvas.getContext('2d')
@@ -313,6 +327,20 @@ function App() {
     setProcessMs(pendingProcessMsRef.current)
   }
 
+  const updateAutoMaxFps = (processTimeMs) => {
+    if (fpsMode !== 'auto' || !Number.isFinite(processTimeMs) || processTimeMs <= 0) return
+    const raw = Math.floor(1000 / Math.max(1, processTimeMs * 1.15))
+    const capped = Math.max(1, Math.min(120, raw))
+    const smoothed = autoFpsEstimateRef.current * 0.75 + capped * 0.25
+    autoFpsEstimateRef.current = smoothed
+    const rounded = Math.max(1, Math.min(120, Math.round(smoothed)))
+    const now = performance.now()
+    if (rounded !== autoMaxFps && now - lastAutoFpsUpdateAtRef.current > 700) {
+      lastAutoFpsUpdateAtRef.current = now
+      setAutoMaxFps(rounded)
+    }
+  }
+
   const cleanupCamera = () => {
     if (rafRef.current) {
       cancelAnimationFrame(rafRef.current)
@@ -340,7 +368,7 @@ function App() {
       recordedVideoUrlRef.current = ''
     }
     recordedChunksRef.current = []
-    const stream = canvas.captureStream(Math.max(1, maxFps))
+    const stream = canvas.captureStream(Math.max(1, effectiveMaxFps))
     const preferred = videoDownloadFormat === 'mp4'
       ? [
           { mime: 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', ext: 'mp4' },
@@ -392,7 +420,7 @@ function App() {
         setStatus(makeStatus('info', t.status.videoEnded))
         return
       }
-      const targetGap = 1000 / Math.max(1, maxFps)
+      const targetGap = 1000 / Math.max(1, effectiveMaxFps)
       if (
         !processingRef.current &&
         now - lastInferAtRef.current >= targetGap &&
@@ -403,6 +431,7 @@ function App() {
         try {
           lastInferAtRef.current = now
           const processTime = await runEnhanceOnElement(video, output, sourceMode === 'camera')
+          updateAutoMaxFps(processTime)
           const times = fpsTimesRef.current
           times.push(now)
           while (times.length > 0 && now - times[0] > 1000) times.shift()
@@ -591,7 +620,7 @@ function App() {
       await video.play()
       syncCanvasSize(video.videoWidth, video.videoHeight)
       setRunning(true)
-      setStatus(makeStatus('success', t.status.cameraStarted(maxFps)))
+      setStatus(makeStatus('success', t.status.cameraStarted(effectiveMaxFps)))
     } catch (error) {
       setStatus(makeStatus('error', t.status.cameraAccessFailed(error.message)))
       cleanupCamera()
@@ -665,7 +694,7 @@ function App() {
       startOutputRecording()
       await video.play()
       setRunning(true)
-      setStatus(makeStatus('success', t.status.videoStarted(maxFps)))
+      setStatus(makeStatus('success', t.status.videoStarted(effectiveMaxFps)))
     } catch (error) {
       setStatus(makeStatus('error', t.status.videoPlayFailed(error.message)))
     }
@@ -705,7 +734,7 @@ function App() {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
     }
-  }, [running, maxFps, sourceMode])
+  }, [running, effectiveMaxFps, sourceMode])
 
   useEffect(() => {
     if (sourceMode === 'camera') {
@@ -927,13 +956,30 @@ function App() {
               </Button>
             </ButtonGroup>
 
-            <Typography gutterBottom>{t.ui.maxFps}: {maxFps} FPS</Typography>
+            <FormControl size="small" fullWidth>
+              <InputLabel id="fps-mode-label">{t.ui.fpsMode}</InputLabel>
+              <Select
+                labelId="fps-mode-label"
+                value={fpsMode}
+                label={t.ui.fpsMode}
+                onChange={(e) => setFpsMode(e.target.value)}
+              >
+                <MenuItem value="manual">{t.ui.fpsModeManual}</MenuItem>
+                <MenuItem value="auto">{t.ui.fpsModeAuto}</MenuItem>
+              </Select>
+            </FormControl>
+            <Typography gutterBottom>
+              {fpsMode === 'auto'
+                ? `${t.ui.maxFps}: ${autoMaxFps} FPS (${t.ui.auto})`
+                : `${t.ui.maxFps}: ${maxFps} FPS`}
+            </Typography>
             <Slider
               value={maxFps}
               min={1}
-              max={30}
+              max={120}
               step={1}
               valueLabelDisplay="auto"
+              disabled={fpsMode === 'auto'}
               onChange={(_, value) => setMaxFps(Number(value))}
             />
 
@@ -1117,7 +1163,7 @@ function App() {
                       <Button variant="contained" onClick={startCamera} disabled={running}>{t.ui.startCamera}</Button>
                       <Button variant="outlined" onClick={stopCamera} disabled={!running}>{t.ui.stopCamera}</Button>
                     </Stack>
-                    <LinearProgress variant="determinate" value={Math.min(100, (currentFps / Math.max(maxFps, 1)) * 100)} />
+                    <LinearProgress variant="determinate" value={Math.min(100, (currentFps / Math.max(effectiveMaxFps, 1)) * 100)} />
                   </Stack>
                 ) : (
                   <Stack spacing={1.5}>
@@ -1140,7 +1186,7 @@ function App() {
                       <Button variant="contained" onClick={startVideoInference} disabled={running}>{t.ui.startVideo}</Button>
                       <Button variant="outlined" onClick={stopVideoInference} disabled={!running}>{t.ui.stopInfer}</Button>
                     </Stack>
-                    <LinearProgress variant="determinate" value={Math.min(100, (currentFps / Math.max(maxFps, 1)) * 100)} />
+                    <LinearProgress variant="determinate" value={Math.min(100, (currentFps / Math.max(effectiveMaxFps, 1)) * 100)} />
                   </Stack>
                 ))}
                 </Box>
