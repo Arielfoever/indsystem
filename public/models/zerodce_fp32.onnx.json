@@ -1,0 +1,15 @@
+{
+  "source_onnx": "C:\\Users\\Ariel\\Desktop\\ind\\onnx\\supervised_zerodce.onnx",
+  "source_onnx_sha256": "a677bb340a812acbfe214cfcd914f8f73bc2b7cd23432aca220e9c93a0467f4b",
+  "created_at_utc": "2026-04-30T20:08:46.102250+00:00",
+  "checkpoint_meta": {
+    "checkpoint": "C:\\Users\\Ariel\\Desktop\\ind\\model\\supervised\\zerodce\\checkpoint_epoch_199.pth",
+    "mode": "supervised",
+    "variant": "zerodce",
+    "img_size": 256,
+    "epoch": 199
+  },
+  "precision": "fp32",
+  "output_onnx": "C:\\Users\\Ariel\\Desktop\\ind\\onnx\\supervised_zerodce_fp32.onnx",
+  "output_onnx_sha256": "a677bb340a812acbfe214cfcd914f8f73bc2b7cd23432aca220e9c93a0467f4b"
+}

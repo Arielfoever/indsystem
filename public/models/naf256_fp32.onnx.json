@@ -1,0 +1,15 @@
+{
+  "source_onnx": "onnx/naf256.onnx",
+  "source_onnx_sha256": "285a8365ac31cd4c7a66476652b7e19a36418e55eebb7dc3888418d318b0acf3",
+  "created_at_utc": "2026-05-01T06:58:32.119504+00:00",
+  "checkpoint_meta": {
+    "checkpoint": "model/supervised/attention_naf/combined_from_two_stage.pth",
+    "mode": "supervised",
+    "variant": "attention_naf",
+    "img_size": 256,
+    "epoch": -1
+  },
+  "precision": "fp32",
+  "output_onnx": "onnx/naf256_fp32.onnx",
+  "output_onnx_sha256": "285a8365ac31cd4c7a66476652b7e19a36418e55eebb7dc3888418d318b0acf3"
+}

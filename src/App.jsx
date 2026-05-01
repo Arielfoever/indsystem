@@ -10,6 +10,7 @@ import {
   Card,
   CardContent,
   Chip,
+  CircularProgress,
   Divider,
   Drawer,
   FormControl,
@@ -29,6 +30,7 @@ import MovieRoundedIcon from '@mui/icons-material/MovieRounded'
 import MemoryRoundedIcon from '@mui/icons-material/MemoryRounded'
 import FullscreenRoundedIcon from '@mui/icons-material/FullscreenRounded'
 import FullscreenExitRoundedIcon from '@mui/icons-material/FullscreenExitRounded'
+import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded'
 import { getMessages } from './i18n'
 import { MODEL_CACHE_NAME, ONLINE_MODELS } from './onlineModels'
 
@@ -65,7 +67,12 @@ function App() {
   const [sourceMode, setSourceMode] = useState('image')
   const [provider, setProvider] = useState('wasm')
   const [modelSource, setModelSource] = useState('online')
+  const [onlineModels, setOnlineModels] = useState(ONLINE_MODELS)
   const [selectedOnlineModel, setSelectedOnlineModel] = useState(ONLINE_MODELS[0].id)
+  const [refreshingModelList, setRefreshingModelList] = useState(false)
+  const [lastModelListRefreshAt, setLastModelListRefreshAt] = useState(null)
+  const [modelListRefreshErrorDetail, setModelListRefreshErrorDetail] = useState('')
+  const [copiedErrorDetail, setCopiedErrorDetail] = useState(false)
   const [cameraDevices, setCameraDevices] = useState([])
   const [selectedCameraId, setSelectedCameraId] = useState('')
   const [cameraMirror, setCameraMirror] = useState(true)
@@ -142,6 +149,14 @@ function App() {
 
   const providerOptions = useMemo(() => ['webgpu', 'webgl', 'wasm'], [])
   const t = useMemo(() => getMessages(lang), [lang])
+  const modelListRefreshTimeText = useMemo(() => {
+    if (!lastModelListRefreshAt) return t.ui.notRefreshedYet
+    return new Intl.DateTimeFormat(lang === 'zh' ? 'zh-CN' : 'en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    }).format(lastModelListRefreshAt)
+  }, [lastModelListRefreshAt, lang, t])
   const effectiveInferenceSize = useMemo(() => {
     const scaled = Math.round((modelInputSize * inferenceScale) / 100)
     const snapped = Math.round(scaled / 8) * 8
@@ -599,7 +614,7 @@ function App() {
   }
 
   const loadOnlineModel = async () => {
-    const model = ONLINE_MODELS.find((item) => item.id === selectedOnlineModel)
+    const model = onlineModels.find((item) => item.id === selectedOnlineModel)
     if (!model) return
     if (onlineModelAbortRef.current) {
       onlineModelAbortRef.current.abort()
@@ -643,6 +658,64 @@ function App() {
       setStatus(makeStatus('success', t.status.modelCacheCleared))
     } catch (error) {
       setStatus(makeStatus('error', t.status.modelCacheClearFailed(error.message)))
+    }
+  }
+
+  const refreshOnlineModelList = async (showStatus = true) => {
+    if (refreshingModelList) return onlineModels
+    setRefreshingModelList(true)
+    setModelListRefreshErrorDetail('')
+    setCopiedErrorDetail(false)
+    try {
+      if (showStatus) setStatus(makeStatus('info', t.status.refreshingModelList))
+      const response = await fetch(`/models/models.json?t=${Date.now()}`, {
+        cache: 'no-store'
+      })
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+      const data = await response.json()
+      if (!Array.isArray(data)) throw new Error('Invalid model list format')
+      const next = data.filter(
+        (item) => item && typeof item.id === 'string' && typeof item.name === 'string' && typeof item.url === 'string' && typeof item.sha256 === 'string'
+      )
+      if (!next.length) throw new Error('Model list is empty')
+      setOnlineModels(next)
+      setSelectedOnlineModel((prev) => (next.some((item) => item.id === prev) ? prev : next[0].id))
+      setLastModelListRefreshAt(new Date())
+      setModelListRefreshErrorDetail('')
+      if (showStatus) setStatus(makeStatus('success', t.status.modelListRefreshed(next.length)))
+      return next
+    } catch (error) {
+      const detail = error?.message || 'unknown error'
+      setOnlineModels(ONLINE_MODELS)
+      setSelectedOnlineModel((prev) => (ONLINE_MODELS.some((item) => item.id === prev) ? prev : ONLINE_MODELS[0].id))
+      setModelListRefreshErrorDetail(detail)
+      if (showStatus) setStatus(makeStatus('warning', t.status.modelListRefreshFallbackWithReason(detail)))
+      return ONLINE_MODELS
+    } finally {
+      setRefreshingModelList(false)
+    }
+  }
+
+  const copyModelListErrorDetail = async () => {
+    if (!modelListRefreshErrorDetail) return
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(modelListRefreshErrorDetail)
+      } else {
+        const area = document.createElement('textarea')
+        area.value = modelListRefreshErrorDetail
+        area.setAttribute('readonly', '')
+        area.style.position = 'fixed'
+        area.style.opacity = '0'
+        document.body.appendChild(area)
+        area.select()
+        document.execCommand('copy')
+        document.body.removeChild(area)
+      }
+      setCopiedErrorDetail(true)
+      setStatus(makeStatus('success', t.status.errorDetailCopied))
+    } catch (error) {
+      setStatus(makeStatus('warning', t.status.errorDetailCopyFailed(error?.message || 'unknown error')))
     }
   }
 
@@ -904,6 +977,10 @@ function App() {
   }, [running, effectiveMaxFps, sourceMode])
 
   useEffect(() => {
+    refreshOnlineModelList(false)
+  }, [])
+
+  useEffect(() => {
     if (sourceMode === 'camera') {
       refreshCameraDevices(true)
     }
@@ -1014,14 +1091,23 @@ function App() {
                     label={t.ui.modelList}
                     onChange={(e) => setSelectedOnlineModel(e.target.value)}
                   >
-                    {ONLINE_MODELS.map((item) => (
+                    {onlineModels.map((item) => (
                       <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>
                     ))}
                   </Select>
                 </FormControl>
+                <Button
+                  variant="outlined"
+                  onClick={() => refreshOnlineModelList(true)}
+                  disabled={refreshingModelList}
+                  startIcon={refreshingModelList ? <CircularProgress size={14} /> : null}
+                >
+                  {refreshingModelList ? `${t.ui.forceRefreshModelList}...` : t.ui.forceRefreshModelList}
+                </Button>
                 <Button variant="contained" onClick={loadOnlineModel}>{t.ui.loadOnlineModel}</Button>
                 <Button variant="outlined" onClick={clearModelCache}>{t.ui.clearModelCache}</Button>
                 <Typography variant="caption">{t.ui.cacheHint}</Typography>
+                <Typography variant="caption">{t.ui.lastRefreshTime}: {modelListRefreshTimeText}</Typography>
               </>
             ) : (
               <>
@@ -1186,6 +1272,37 @@ function App() {
             />
 
             <Alert severity={statusSeverity}>{status.text}</Alert>
+            {!!modelListRefreshErrorDetail && (
+              <Box
+                component="details"
+                sx={{
+                  mt: 0.5,
+                  p: 1,
+                  borderRadius: 1,
+                  border: '1px solid #d7deea',
+                  background: '#f7f9fc',
+                  '& > summary': {
+                    cursor: 'pointer',
+                    fontSize: '0.78rem',
+                    fontWeight: 600
+                  }
+                }}
+              >
+                <summary>{t.ui.errorDetail}</summary>
+                <Button
+                  size="small"
+                  variant="text"
+                  startIcon={<ContentCopyRoundedIcon fontSize="inherit" />}
+                  onClick={copyModelListErrorDetail}
+                  sx={{ mt: 0.6, mb: 0.2, px: 0.5, minWidth: 0 }}
+                >
+                  {copiedErrorDetail ? t.ui.copied : t.ui.copyDetail}
+                </Button>
+                <Typography variant="caption" component="pre" sx={{ m: 0, mt: 0.8, whiteSpace: 'pre-wrap' }}>
+                  {modelListRefreshErrorDetail}
+                </Typography>
+              </Box>
+            )}
             <Stack spacing={0.8} sx={{ mt: 0.5 }}>
               <Typography variant="caption" sx={{ fontWeight: 700 }}>{t.ui.envCheck}</Typography>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} useFlexGap flexWrap="wrap" sx={{ width: '100%', minWidth: 0 }}>
