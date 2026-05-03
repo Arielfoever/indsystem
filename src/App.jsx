@@ -668,13 +668,7 @@ function App() {
     setCopiedErrorDetail(false)
     try {
       if (showStatus) setStatus(makeStatus('info', t.status.refreshingModelList))
-      const response = await fetch(`/models/models.json?t=${Date.now()}`, {
-        cache: 'no-store'
-      })
-      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
-      const data = await response.json()
-      if (!Array.isArray(data)) throw new Error('Invalid model list format')
-      const next = data.filter(
+      const next = ONLINE_MODELS.filter(
         (item) => item && typeof item.id === 'string' && typeof item.name === 'string' && typeof item.url === 'string' && typeof item.sha256 === 'string'
       )
       if (!next.length) throw new Error('Model list is empty')
