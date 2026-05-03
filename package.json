@@ -4,8 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "gen:model-manifest": "node scripts/generate-models-manifest.mjs",
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run gen:model-manifest && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },

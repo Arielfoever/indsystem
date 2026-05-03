@@ -2,6 +2,30 @@ export const MODEL_CACHE_NAME = "zerodce-model-cache-v1"
 
 export const ONLINE_MODELS = [
   {
+    id: "zerodce",
+    name: "ZeroDCE",
+    url: "/models/zerodce.onnx",
+    sha256: "a677bb340a812acbfe214cfcd914f8f73bc2b7cd23432aca220e9c93a0467f4b"
+  },
+  {
+    id: "zerodce_fp16",
+    name: "ZeroDCE fp16",
+    url: "/models/zerodce_fp16.onnx",
+    sha256: "c46319054beffd471b5eb5d88eb7cf73d7693e402c1c9e4ce636379ff495e528"
+  },
+  {
+    id: "zerodce_fp32",
+    name: "ZeroDCE fp32",
+    url: "/models/zerodce_fp32.onnx",
+    sha256: "a677bb340a812acbfe214cfcd914f8f73bc2b7cd23432aca220e9c93a0467f4b"
+  },
+  {
+    id: "zerodce_int8",
+    name: "ZeroDCE int8",
+    url: "/models/zerodce_int8.onnx",
+    sha256: "b3e653864d9ad3907257c353e2560153787a50e57d915a2eb4e2c21b68e1e1bb"
+  },
+  {
     id: "zerodcedce-attention-naf",
     name: "zerodcedce-attention-naf",
     url: "/models/zerodcedce-attention-naf.onnx",

@@ -27,12 +27,12 @@ def pretty_name(stem: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate src/onlineModels.js from public/models/*.onnx")
-    parser.add_argument("--models-dir", default="./public/models", help="Directory containing .onnx files")
-    parser.add_argument("--output", default="./src/onlineModels.js", help="Output JS file")
+    parser.add_argument("--models-dir", default="public/models", help="Directory containing .onnx files")
+    parser.add_argument("--output", default="src/onlineModels.js", help="Output JS file")
     parser.add_argument("--cache-name", default="zerodce-model-cache-v1", help="MODEL_CACHE_NAME value")
     args = parser.parse_args()
 
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[0]
     models_dir = (root / args.models_dir).resolve()
     output_path = (root / args.output).resolve()
 
