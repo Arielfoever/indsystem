@@ -2,81 +2,75 @@ export const MODEL_CACHE_NAME = "zerodce-model-cache-v1"
 
 export const ONLINE_MODELS = [
   {
-    id: "attention",
-    name: "attention",
-    url: "/models/attention.onnx",
-    sha256: "338f0bc2f5764da3b410f3da5a9d156e14ed9da8cefc13ee2d4fd7d8b6026085"
+    id: "zerodcedce-attention-naf",
+    name: "zerodcedce-attention-naf",
+    url: "/models/zerodcedce-attention-naf.onnx",
+    sha256: "e6084dec48da306a6372d04fc75738050c029c5e56140df87136433095276c0c"
   },
   {
-    id: "attention_fp16",
-    name: "attention fp16",
-    url: "/models/attention_fp16.onnx",
-    sha256: "154863a15917f3f4073b2032786447c5b5ba64179621dd9ce053899120eda46d"
+    id: "zerodcedce-attention-naf_fp16",
+    name: "zerodcedce-attention-naf fp16",
+    url: "/models/zerodcedce-attention-naf_fp16.onnx",
+    sha256: "e929bac42b48827c6346edea290dace1b0309556bba75f612b01d5adc40c5d4e"
   },
   {
-    id: "attention_fp32",
-    name: "attention fp32",
-    url: "/models/attention_fp32.onnx",
-    sha256: "338f0bc2f5764da3b410f3da5a9d156e14ed9da8cefc13ee2d4fd7d8b6026085"
+    id: "zerodcedce-attention-naf_fp32",
+    name: "zerodcedce-attention-naf fp32",
+    url: "/models/zerodcedce-attention-naf_fp32.onnx",
+    sha256: "e6084dec48da306a6372d04fc75738050c029c5e56140df87136433095276c0c"
   },
   {
-    id: "attention_int8",
-    name: "attention int8",
-    url: "/models/attention_int8.onnx",
-    sha256: "a4695588f0cf35b078863c996e582ce3bbd53519dd9889c7298c5ea38d03bd85"
+    id: "zerodcedce-attention-naf_int8",
+    name: "zerodcedce-attention-naf int8",
+    url: "/models/zerodcedce-attention-naf_int8.onnx",
+    sha256: "5d86a39f5244784b39c9099619d0a334f7653d160698ffcd5f0ee454860f937d"
   },
   {
-    id: "CPCA1",
-    name: "CPCA1",
-    url: "/models/CPCA1.onnx",
-    sha256: "2dec049134324df57a36c136ed501cd5a0d7e1705400cb5aefbf84541fabdb58"
+    id: "zerodcedce-attention",
+    name: "zerodcedce-attention",
+    url: "/models/zerodcedce-attention.onnx",
+    sha256: "48e4bd6cf408ad33cc1d9e4c74f05ad95dde23cfb7d3b728e45221e588e34325"
   },
   {
-    id: "naf256",
-    name: "naf256",
-    url: "/models/naf256.onnx",
-    sha256: "285a8365ac31cd4c7a66476652b7e19a36418e55eebb7dc3888418d318b0acf3"
+    id: "zerodcedce-attention_fp16",
+    name: "zerodcedce-attention fp16",
+    url: "/models/zerodcedce-attention_fp16.onnx",
+    sha256: "fff0a59eab1cd38f36f94d494a74caa6318c0d500920002287f18329ad443a45"
   },
   {
-    id: "naf256_fp16",
-    name: "naf256 fp16",
-    url: "/models/naf256_fp16.onnx",
-    sha256: "9da405effc15886b47b2f004512ac6d7b483af87bb693b8bb17c399868bb777e"
+    id: "zerodcedce-attention_fp32",
+    name: "zerodcedce-attention fp32",
+    url: "/models/zerodcedce-attention_fp32.onnx",
+    sha256: "48e4bd6cf408ad33cc1d9e4c74f05ad95dde23cfb7d3b728e45221e588e34325"
   },
   {
-    id: "naf256_fp32",
-    name: "naf256 fp32",
-    url: "/models/naf256_fp32.onnx",
-    sha256: "285a8365ac31cd4c7a66476652b7e19a36418e55eebb7dc3888418d318b0acf3"
+    id: "zerodcedce-attention_int8",
+    name: "zerodcedce-attention int8",
+    url: "/models/zerodcedce-attention_int8.onnx",
+    sha256: "ca98499ce94b0ab0f13001a715e532ecab8d60935def2ab8f6daa6634a25bbb2"
   },
   {
-    id: "naf256_int8",
-    name: "naf256 int8",
-    url: "/models/naf256_int8.onnx",
-    sha256: "e1b216efe5f49bed2bd1b96b86093effb59ab03c5528fd5f7f1a8a0c4cfc024d"
+    id: "zerodcedce",
+    name: "zerodcedce",
+    url: "/models/zerodcedce.onnx",
+    sha256: "fb109f9b08ee72c1cbc5b94ae82fd8952ca6f567d493900cdf06382e46675ed4"
   },
   {
-    id: "zerodce",
-    name: "ZeroDCE",
-    url: "/models/zerodce.onnx",
-    sha256: "a677bb340a812acbfe214cfcd914f8f73bc2b7cd23432aca220e9c93a0467f4b"
+    id: "zerodcedce_fp16",
+    name: "zerodcedce fp16",
+    url: "/models/zerodcedce_fp16.onnx",
+    sha256: "3a1bf298e72ed18bab8a244d315542e78ba43d5875e46c2903f5343aaccd8195"
   },
   {
-    id: "zerodce_fp16",
-    name: "ZeroDCE fp16",
-    url: "/models/zerodce_fp16.onnx",
-    sha256: "c46319054beffd471b5eb5d88eb7cf73d7693e402c1c9e4ce636379ff495e528"
+    id: "zerodcedce_fp32",
+    name: "zerodcedce fp32",
+    url: "/models/zerodcedce_fp32.onnx",
+    sha256: "fb109f9b08ee72c1cbc5b94ae82fd8952ca6f567d493900cdf06382e46675ed4"
   },
   {
-    id: "zerodce_fp32",
-    name: "ZeroDCE fp32",
-    url: "/models/zerodce_fp32.onnx",
-    sha256: "a677bb340a812acbfe214cfcd914f8f73bc2b7cd23432aca220e9c93a0467f4b"
-  },
-  {
-    id: "zerodce_int8",
-    name: "ZeroDCE int8",
-    url: "/models/zerodce_int8.onnx",
-    sha256: "b3e653864d9ad3907257c353e2560153787a50e57d915a2eb4e2c21b68e1e1bb"
+    id: "zerodcedce_int8",
+    name: "zerodcedce int8",
+    url: "/models/zerodcedce_int8.onnx",
+    sha256: "07d68539a642bd36a7932c24267b053c9e1c3da2adfb998e9968b388fbd12ef4"
   }
 ]

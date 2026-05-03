@@ -1,0 +1,23 @@
+{
+  "source_onnx": "onnx/zerodcedce.onnx",
+  "source_onnx_sha256": "fb109f9b08ee72c1cbc5b94ae82fd8952ca6f567d493900cdf06382e46675ed4",
+  "created_at_utc": "2026-05-03T11:54:15.139594+00:00",
+  "checkpoint_meta": {
+    "checkpoint": "model/supervised/zerodcedce/checkpoint_epoch_199.pth",
+    "mode": "supervised",
+    "variant": "zerodcedce",
+    "img_size": 256,
+    "epoch": 199
+  },
+  "precision": "int8",
+  "output_onnx": "onnx/zerodcedce_int8.onnx",
+  "output_onnx_sha256": "07d68539a642bd36a7932c24267b053c9e1c3da2adfb998e9968b388fbd12ef4",
+  "quantization": {
+    "method": "dynamic",
+    "preprocess": "none",
+    "per_channel": false,
+    "reduce_range": false,
+    "weight_type": "qint8",
+    "op_types": null
+  }
+}

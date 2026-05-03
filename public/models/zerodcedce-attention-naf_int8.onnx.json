@@ -1,0 +1,23 @@
+{
+  "source_onnx": "onnx/zerodcedce-attention-naf.onnx",
+  "source_onnx_sha256": "e6084dec48da306a6372d04fc75738050c029c5e56140df87136433095276c0c",
+  "created_at_utc": "2026-05-03T11:54:35.910978+00:00",
+  "checkpoint_meta": {
+    "checkpoint": "model/supervised/zerodcedce-attention-naf/combined_from_two_stage.pth",
+    "mode": "supervised",
+    "variant": "zerodcedce-attention-naf",
+    "img_size": 256,
+    "epoch": -1
+  },
+  "precision": "int8",
+  "output_onnx": "onnx/zerodcedce-attention-naf_int8.onnx",
+  "output_onnx_sha256": "5d86a39f5244784b39c9099619d0a334f7653d160698ffcd5f0ee454860f937d",
+  "quantization": {
+    "method": "dynamic",
+    "preprocess": "none",
+    "per_channel": false,
+    "reduce_range": false,
+    "weight_type": "qint8",
+    "op_types": null
+  }
+}

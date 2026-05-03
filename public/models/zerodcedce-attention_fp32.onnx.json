@@ -1,0 +1,15 @@
+{
+  "source_onnx": "onnx/zerodcedce-attention.onnx",
+  "source_onnx_sha256": "48e4bd6cf408ad33cc1d9e4c74f05ad95dde23cfb7d3b728e45221e588e34325",
+  "created_at_utc": "2026-05-03T11:45:33.044365+00:00",
+  "checkpoint_meta": {
+    "checkpoint": "model/supervised/zerodcedce-attention2/checkpoint_epoch_44.pth",
+    "mode": "supervised",
+    "variant": "zerodcedce-attention",
+    "img_size": 256,
+    "epoch": 44
+  },
+  "precision": "fp32",
+  "output_onnx": "onnx/zerodcedce-attention_fp32.onnx",
+  "output_onnx_sha256": "48e4bd6cf408ad33cc1d9e4c74f05ad95dde23cfb7d3b728e45221e588e34325"
+}
